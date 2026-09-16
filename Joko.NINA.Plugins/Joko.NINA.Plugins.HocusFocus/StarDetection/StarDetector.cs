@@ -415,6 +415,7 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection {
             // Early-only metric counters captured here so GateAndMeasure can seed a fresh metrics with them. These
             // are produced by the early pipeline (hotpixel filter) and the candidate flood-fill / global scan.
             internal long HotpixelCount;
+            internal long MeasurementHotpixelCount;
             internal int StructureCandidates;
             internal long SaturatedPixelCount;
 
@@ -565,7 +566,11 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection {
                         if (!hotpixelFilterAlreadyApplied && (p.HotpixelFiltering || (p.NoiseReductionRadius > 0 && p.StarMeasurementNoiseReductionEnabled))) {
                             using (var nativeStructureSource = srcImage.Clone()) {
                                 metrics.HotpixelCount = ApplyHotpixelFilter(nativeStructureSource, p);
-                                prebinnedStructureSource = CvImageUtility.BinMean(nativeStructureSource, binning);
+                                // Tracked the moment it exists: the isolation repair and the measurement bin
+                                // below both allocate a full native-resolution frame, and an OOM out of either
+                                // would otherwise orphan this Mat — it belongs to neither tracker until then,
+                                // and it is not liveOwnedImage, so the finally could not free it.
+                                prebinnedStructureSource = scratch.T(CvImageUtility.BinMean(nativeStructureSource, binning));
                             }
                             metrics.MeasurementHotpixelCount = HotpixelFiltering.RepairIsolatedHotpixels(srcImage);
                             measurementDiffersFromStructure = true;
@@ -573,9 +578,6 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection {
                         }
 
                         AdoptPreparedImage(CvImageUtility.BinMean(srcImage, binning));
-                    }
-                    if (prebinnedStructureSource != null) {
-                        scratch.T(prebinnedStructureSource);
                     }
 
                     MaybeSaveIntermediateImage(srcImage, p, "01-source.tif");
@@ -621,10 +623,10 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection {
                             AdoptPreparedImage(acceleratedSpan.MeasurementImage);
                         }
                         structureMap = scratch.T(acceleratedSpan.StructureMap);
-                        metrics.HotpixelCount = acceleratedSpan.HotpixelCount;
-                        // The binning hoist may already have counted the measurement repair it ran at native
-                        // resolution; the span only reports a count when it ran the repair itself.
-                        if (acceleratedSpan.MeasurementHotpixelCount > 0) {
+                        // When the binning hoist supplied the structure source, it already ran BOTH filters at
+                        // native resolution and counted them; the span skips them and would report 0 for each.
+                        if (prebinnedStructureSource == null) {
+                            metrics.HotpixelCount = acceleratedSpan.HotpixelCount;
                             metrics.MeasurementHotpixelCount = acceleratedSpan.MeasurementHotpixelCount;
                         }
                         measurementDiffersFromStructure |= acceleratedSpan.MeasurementDiffersFromStructure;
@@ -849,6 +851,7 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection {
                         RoiRect = roiRect,
                         DebugData = debugData,
                         HotpixelCount = metrics.HotpixelCount,
+                        MeasurementHotpixelCount = metrics.MeasurementHotpixelCount,
                         StructureCandidates = metrics.StructureCandidates,
                         SaturatedPixelCount = metrics.SaturatedPixelCount
                     };
@@ -886,6 +889,7 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection {
                 // the CFA count, exactly as the monolithic Detect(IRenderedImage) did; otherwise the early
                 // structure-pipeline count is authoritative.
                 HotpixelCount = ctx.DebayerHotpixelCount ?? ctx.HotpixelCount,
+                MeasurementHotpixelCount = ctx.MeasurementHotpixelCount,
                 StructureCandidates = ctx.StructureCandidates,
                 SaturatedPixelCount = ctx.SaturatedPixelCount
             };
@@ -1039,7 +1043,9 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection {
         /// </list>
         ///
         /// <para>The noise-reduction Gaussian follows the same split: the structure source always takes it when a
-        /// radius is configured, the measurement image only when StarMeasurementNoiseReductionEnabled is set.</para>
+        /// radius is configured, the measurement image only when StarMeasurementNoiseReductionEnabled is set. With
+        /// that option ON the Gaussian therefore runs once per image rather than once in total (the images are no
+        /// longer copies of each other, so one blur cannot serve both). Values are unchanged; the cost is not.</para>
         ///
         /// <para>When <paramref name="hotpixelFilterAlreadyApplied"/> is set — the bayered CFA path, which filters
         /// the raw sensor data before debayering — neither path filters again, exactly as before.</para>

@@ -71,7 +71,13 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
         /// </summary>
         public const float IsolatedHotpixelNeighborRatio = 3.0f;
 
-        /// <summary>Floor applied to the local-sigma grid, so a perfectly flat block cannot make every pixel significant.</summary>
+        /// <summary>
+        /// Floor applied to the local-sigma grid, so a block with a zero MAD cannot divide the significance test
+        /// by nothing. It is deliberately far below any real frame's noise (5 x this is a third of one 16-bit ADU),
+        /// which means it does NOT act as a minimum amplitude: in a block with no measurable noise at all — an
+        /// all-zero masked or overscan region — a single pixel one ADU above its neighbours does qualify. That is
+        /// the right answer for such a pixel, and nothing is measured in those regions anyway.
+        /// </summary>
         public const float IsolatedHotpixelSigmaFloor = 1e-6f;
 
         /// <summary>

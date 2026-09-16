@@ -130,8 +130,10 @@ signal for every adjustment below. It reports:
 - **Structure Candidates** — bright structures evaluated as potential stars before any gate.
 - **Total Detected** — stars accepted after all gates.
 - a **per-reason rejection count** for each gate: **Too Small**, **On Border**, **Too Distorted**, **Not
-  Centered**, **Too Flat**, **Low Sensitivity**, **Saturated** (kept, not rejected: pixels masked during
-  PSF fitting), **Degenerate**, and **Contaminated**.
+  Centered**, **Too Flat**, **Low Sensitivity**, **Saturated** (kept, not rejected: measured for HFR, but
+  given no PSF model), **Degenerate**, and **Contaminated**.
+- **Hotpixels** and **Repaired Hotpixels** — what the structure image's median filter rewrote, and what the
+  measurement image's isolation repair rewrote. See [Hot Pixels & Saturation](hotpixel-saturation.md).
 
 When you change a setting, re-run detection and watch the count for the gate you are tuning. That number,
 not a subjective look at the image, tells you whether the change helped.

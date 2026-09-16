@@ -160,6 +160,20 @@ namespace TestApp {
                 return;
             }
 
+            // Plugin settings export -> harness option bag: `TestApp convert-settings --import <export> --out <file>`.
+            if (args.Length > 0 && args[0].Equals("convert-settings", StringComparison.OrdinalIgnoreCase)) {
+                await ConvertSettingsRunner.Run(args);
+                return;
+            }
+
+            // PSF modelling across the AF bank: `TestApp psf-bank --runs <bank> --out <dir> [--select]`.
+            // One nearest-focus frame per run, detected with ModelPSF on, reporting fit acceptance, the FWHM
+            // distribution, the scatter about a fitted field surface, and the PSF stage's own wall time.
+            if (args.Length > 0 && args[0].Equals("psf-bank", StringComparison.OrdinalIgnoreCase)) {
+                await PsfBankRunner.Run(args);
+                return;
+            }
+
             // Minimal CSV-driven annotator: `TestApp annotate --image <frame> --stars <csv> ...` (or --runs).
             // Overlays an external star list on the real plugin MTF stretch; also exports plain stretched PNGs.
             if (args.Length > 0 && args[0].Equals("annotate", StringComparison.OrdinalIgnoreCase)) {

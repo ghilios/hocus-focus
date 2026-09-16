@@ -1,6 +1,6 @@
 # Hot Pixels & Saturation
 
-Two unrelated artifacts pollute star measurements: single bright **hot pixels** that masquerade as tiny stars, and **saturated** (clipped) cores that flatten the bright peak of an otherwise good star. Hocus Focus handles them up front in the detection pipeline. Hot pixels are cleaned out of the source image before star structures are found, and saturated pixels are masked out of the PSF fit so they do not bias the fitted profile.
+Two unrelated artifacts pollute star measurements: single bright **hot pixels** that masquerade as tiny stars, and **saturated** (clipped) cores that flatten the bright peak of an otherwise good star. Hocus Focus handles them up front in the detection pipeline. Hot pixels are cleaned out before star structures are found, and a star whose core is clipped is measured for HFR but gets no PSF model.
 
 ![The Hotpixel Threshold and Saturation Threshold settings highlighted in the advanced list](../assets/screenshots/advanced-hotpixel-saturation.png){ width=400 }
 
@@ -12,24 +12,37 @@ These options live in the **Advanced** star-detection settings. In Simple mode o
 
 | Setting | Default | Range | Effect |
 |---|---|---|---|
-| Hotpixel Filtering | On | On / Off | Apply a 3×3 median filter to remove hot pixels before detection |
-| Use Hotpixel Thresholding | On | On / Off | Replace only pixels that differ sharply from the median, instead of blurring everything |
-| Hotpixel Threshold | 0.1% (0.001) | (0, 100%] | How far a pixel must sit from its 3×3 median (as a fraction of full well) to count as a hot pixel |
-| Saturation Threshold | 99% (0.99) | (0, 100%] | Pixels at or above this fraction of full well are treated as saturated and masked during PSF fitting |
+| Hotpixel Filtering | On | On / Off | Clean hot pixels out of the frame before detection |
+| Use Hotpixel Thresholding | On | On / Off | On the structure image, replace only pixels that differ sharply from the median instead of blurring everything |
+| Hotpixel Threshold | 0.1% (0.001) | (0, 100%] | On the structure image, how far a pixel must sit from its 3×3 median (as a fraction of full well) to count as a hot pixel |
+| Saturation Threshold | 99% (0.99) | (0, 100%] | Pixels at or above this fraction of full well count as saturated; a star containing any gets no PSF model |
 | Exclude Saturated Stars From HFR | On | On / Off | Leave partially-saturated stars out of the per-frame HFR average; they stay detected and counted |
 
 ---
 
 ## Hotpixel Filtering
 
-**What it does:** runs a 3×3 box-median convolution over the source image to suppress isolated hot pixels before star structures are detected.
+**What it does:** cleans isolated hot pixels out of the frame before star structures are detected.
 
 > Uses a 3x3 box median convolution to filter out hotpixels. This should be on, unless you're working with a calibrated image with hotpixels removed
 
 - **Default:** On
 - **Range:** On / Off
 
-A hot pixel is a single sensor cell that reads anomalously high regardless of incoming light. Left in the image it forms a tiny, sharp, one-pixel "star" that survives structure detection and contaminates HFR and star-count statistics. A 3×3 median replaces each pixel with the median of its neighborhood, which removes a lone outlier while leaving genuine multi-pixel stars intact. The median filter radius is fixed at 1 (a 3×3 window); only that size is supported.
+A hot pixel is a single sensor cell that reads anomalously high regardless of incoming light. Left in the image it forms a tiny, sharp, one-pixel "star" that survives structure detection and contaminates HFR and star-count statistics. The median filter radius is fixed at 1 (a 3×3 window); only that size is supported.
+
+### Two images, two filters
+
+Detection works on two derived images, and each gets the hot-pixel treatment that suits it.
+
+The **structure image** is what star candidates are found in. It takes the 3×3 median described by the settings below. Candidate formation needs that smoothing: run it on an unfiltered frame and roughly a quarter of the detections are lost to noise.
+
+The **measurement image** is what each star's HFR and PSF model are measured from. It takes a targeted repair instead. A pixel is rewritten to its 3×3 median only when it stands more than five local noise sigmas above the local background *and* its brightest neighbor sits below a third of that amplitude. A hot pixel passes both tests, because its neighbors stay at background. A star core fails the second one, because its neighbors carry most of its light.
+
+That split exists because a median over the measurement image is an expensive filter to run. On a real frame it drops a bright star's peak by about a fifth, widens its half-maximum width, and biases every fitted FWHM about 6% high, which also flattens roughly a third of the real focus gradient across the sensor. The targeted repair removes the hot pixels without touching the stars. The count of pixels it rewrote appears as **Repaired Hotpixels** in the [Star Detection Results panel](index.md#reading-the-results-the-star-detection-results-panel).
+
+!!! note
+    Because the measurement image is no longer median-smoothed, its noise estimate is now the frame's honest noise rather than a suppressed one. The **Brightness Sensitivity** gate is expressed in multiples of that noise, so the same value now rejects more of the faintest stars than it used to. If a frame's star count dropped after upgrading and you want the fainter stars back, lower Brightness Sensitivity or re-run the optimization wizard.
 
 When noise reduction is in play, hot-pixel filtering also runs first so the hot pixels are not smeared into their neighbors by the noise-reduction blur.
 
@@ -43,17 +56,19 @@ When noise reduction is in play, hot-pixel filtering also runs first so the hot 
 
 ## Use Hotpixel Thresholding
 
-**What it does:** restricts the median replacement to pixels that differ sharply from their local median, instead of replacing every pixel and blurring the whole image.
+**What it does:** on the structure image, restricts the median replacement to pixels that differ sharply from their local median, instead of replacing every pixel and blurring the whole image.
 
 > A more sophisticated version of hotpixel filtering that limits pixel replacement to those where the median is far off of the pixel value. This prevents the whole image from being blurred, which can have a negative effect on HFR and PSF measurement accuracy
 
 - **Default:** On
 - **Range:** On / Off
 
-A plain 3×3 median replaces *every* pixel with its neighborhood median. That is effectively a light blur across the entire frame, which softens real stars and biases HFR and PSF measurements. Thresholded filtering compares each pixel against its 3×3 median and only swaps it when the difference exceeds **Hotpixel Threshold**. Pixels that match their surroundings are left exactly as-is, so only true outliers are touched and the rest of the image keeps its native sharpness. It is somewhat more compute-intensive than the unconditional median, but preserves measurement accuracy.
+A plain 3×3 median replaces *every* pixel with its neighborhood median, which is effectively a light blur across the whole structure image. Thresholded filtering compares each pixel against its 3×3 median and only swaps it when the difference exceeds **Hotpixel Threshold**, so pixels that match their surroundings are left exactly as-is. It is somewhat more compute-intensive than the unconditional median.
+
+This setting governs the **structure image only**. The measurement image, where HFR and the PSF are measured, always uses the isolation test described above, so neither of these settings can soften a star core there.
 
 !!! tip "When this helps"
-    Leave this **on** in almost all cases. It removes hot pixels without softening real stars, which protects HFR and PSF fit quality. Turning it **off** reverts to an unconditional median that blurs everything; Simple mode compensates for that blur by widening the noise-reduction radius, but in Advanced mode you would be giving up sharpness for no benefit.
+    Leave this **on** in almost all cases. Turning it **off** reverts the structure image to an unconditional median that blurs everything; Simple mode compensates for that blur by widening the noise-reduction radius.
 
 !!! note
     When thresholding is **on**, the filter only replaces outlier pixels and does not blur, so Simple mode adds 1 to the noise-reduction radius (whenever hot-pixel filtering is on with thresholding enabled, the default) to compensate; with thresholding off, the plain median already blurs, so no extra radius is added.
@@ -87,20 +102,24 @@ so at the 0.1% default a pixel must exceed its local median by one part in a tho
 
 ## Saturation Threshold
 
-**What it does:** marks pixels at or above this fraction of full well as saturated; star candidates containing them are still measured, but the saturated pixels are masked out of the PSF fit.
+**What it does:** marks pixels at or above this fraction of full well as saturated; a star containing any is still detected and measured for HFR, but gets no PSF model.
 
-> A percentage representing the cutoff threshold for detecting a saturated pixel. Star candidates containing saturated pixels are processed with those pixels masked during PSF fitting
+> A percentage representing the cutoff threshold for detecting a saturated pixel. Star candidates containing saturated pixels are still detected and measured, but no PSF model is fit to them
 
 - **Default:** 99% (0.99)
 - **Range:** greater than 0% up to and including 100% (the editor accepts 0–100%; values must be within \((0, 1]\) as a fraction)
 
-When a star's core clips at the sensor's full-well limit, its peak flattens into a plateau, and the true profile is lost in those pixels. Fitting a Gaussian or Moffat through a flat top would distort the amplitude, width, and therefore the reported FWHM and eccentricity. Hocus Focus does **not** reject a partially-saturated star outright; instead, during PSF fitting it discards every pixel whose raw value is at or above the saturation threshold and fits the model to the remaining, unclipped pixels. (A fit is only attempted if at least 10 unsaturated pixels survive the mask; otherwise the star gets no PSF model.) The bright but unclipped wings still carry enough shape information to recover a clean profile. The count of saturated pixels and saturated stars is tracked in the detection metrics.
+When a star's core clips at the sensor's full-well limit, its peak flattens into a plateau and the true profile is lost in those pixels. Hocus Focus does **not** reject such a star: it keeps its position, its structure and its own HFR. What it does not do is fit a PSF to it.
+
+The reason is that a clipped core leaves the fit with wings only, and the wings alone cannot determine a width. Masking the clipped pixels out and fitting the rest sounds reasonable, and it is what earlier versions did, but the remaining samples are consistent with a wide range of widths: the solver settles wherever its amplitude limit puts it. On one measured frame the five saturated stars came out anywhere between 15% narrower and 54% wider than their unsaturated neighbors, with the sign depending on how much of the core survived, and no goodness-of-fit gate separated them from a genuinely good fit on a bright star. Leaving them unfitted keeps those numbers out of the frame's FWHM, sigma and eccentricity, which are medians over the stars that do have a model.
+
+Saturated stars are counted as **Saturated** in the detection metrics, and the total number of saturated pixels as **Saturated Pixels**.
 
 ![A saturated star with a flat-topped core and its profile clipping at the saturation threshold](../assets/figures/saturated-star.png){ width=620 }
-*The saturated core (left) reads a flat plateau; its horizontal cut (right) clips at the threshold. Those plateau pixels are excluded from the PSF fit, which is anchored on the unclipped wings.*
+*The saturated core (left) reads a flat plateau; its horizontal cut (right) clips at the threshold. With the peak gone, the surviving wings no longer pin down the star's width, so no PSF model is fit.*
 
 !!! tip "When this helps"
-    Leave the default (99%) for most setups. **Lower** it if your sensor or processing introduces non-linearity or blooming just below the full-well point, so those tainted near-saturation pixels are also excluded from fits. **Raise** it toward 100% only if you are confident your sensor stays linear right up to the clip point and want to keep as many pixels as possible in the fit. Setting it too low needlessly throws away good pixels and can leave too few for a reliable fit.
+    Leave the default (99%) for most setups. **Lower** it if your sensor or processing introduces non-linearity or blooming just below the full-well point, so stars tainted by those near-saturation pixels also stop contributing a PSF. **Raise** it toward 100% only if you are confident your sensor stays linear right up to the clip point. Setting it too low costs you PSF measurements on perfectly good bright stars.
 
 ---
 

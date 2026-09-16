@@ -314,6 +314,11 @@ namespace NINA.Joko.Plugins.HocusFocus.Gpu {
         /// copies the result back. dSmooth is scratch until the wavelet, and dTmp is scratch throughout.
         /// </summary>
         private long RepairIsolatedHotpixels(MemoryBuffer1D<float, Stride1D.Dense> image) {
+            if (width < 3 || height < 3) {
+                // Mirrors the CPU early-out. Without it the kernel would still repair pixels on a degenerate
+                // frame that the oracle leaves alone, and oracle parity is the whole point of this pair.
+                return 0L;
+            }
             int blockSize = Utility.HotpixelFiltering.IsolatedHotpixelBackgroundBlockSize;
             int gridCols = (width + blockSize - 1) / blockSize;
             int gridRows = (height + blockSize - 1) / blockSize;
