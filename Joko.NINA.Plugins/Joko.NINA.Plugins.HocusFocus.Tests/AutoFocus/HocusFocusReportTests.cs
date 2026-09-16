@@ -1,4 +1,4 @@
-using NINA.Joko.Plugins.HocusFocus.AutoFocus;
+﻿using NINA.Joko.Plugins.HocusFocus.AutoFocus;
 using NINA.Joko.Plugins.HocusFocus.Interfaces;
 using NUnit.Framework;
 
@@ -115,9 +115,9 @@ public class StarDetectorParamsTests {
             Assert.That(p.SaturationThreshold, Is.EqualTo(0.99).Within(1e-6));
             Assert.That(p.ModelPSF, Is.True);
             Assert.That(p.PSFFitType, Is.EqualTo(StarDetectorPSFFitType.Moffat_40));
-            Assert.That(p.UsePSFAbsoluteDeviation, Is.False);
+            Assert.That(p.UsePSFAbsoluteDeviation, Is.True);
             Assert.That(p.PSFGoodnessOfFitThreshold, Is.EqualTo(0.9));
-            Assert.That(p.PSFResolution, Is.EqualTo(10));
+            Assert.That(p.PSFResolution, Is.EqualTo(20));
             Assert.That(p.PSFParallelPartitionSize, Is.EqualTo(100));
             Assert.That(p.PixelScale, Is.EqualTo(1.0));
         });

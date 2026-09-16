@@ -232,8 +232,10 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection {
             StructureDilationSize = 3;
             StructureDilationCount = 0;
             PSFFitType = StarDetectorPSFFitType.Moffat_40;
-            // TODO: Consider increasing the resolution for long focal lengths
-            PSFResolution = 10;
+            // 20 (1 sample per pixel on a nominal 20 px box) rather than 10: paired with UsePSFAbsoluteDeviation
+            // it cuts FWHM MAD 14% and the scatter about the field surface 6.5% with detection, star positions
+            // and every HFR value bit-identical. See docs/saturated-star-fwhm-investigation-results.md Part 3.
+            PSFResolution = 20;
             PSFFitThreshold = 0.9;
             HotpixelThreshold = 0.001d;
         }
@@ -302,9 +304,9 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection {
             }
             saveIntermediateImages = false;
             psfParallelPartitionSize = optionsAccessor.GetValueInt32("PSFParallelPartitionSize", 100);
-            psfResolution = optionsAccessor.GetValueInt32("PSFResolution", 10);
+            psfResolution = optionsAccessor.GetValueInt32("PSFResolution", 20);
             psfFitThreshold = optionsAccessor.GetValueDouble("PSFFitThreshold", 0.9);
-            usePSFAbsoluteDeviation = optionsAccessor.GetValueBoolean(nameof(UsePSFAbsoluteDeviation), false);
+            usePSFAbsoluteDeviation = optionsAccessor.GetValueBoolean(nameof(UsePSFAbsoluteDeviation), true);
             hotpixelThreshold = optionsAccessor.GetValueDouble(nameof(HotpixelThreshold), 0.001d);
             saturationThreshold = optionsAccessor.GetValueDouble(nameof(SaturationThreshold), 0.99d);
             excludeSaturatedStarsFromHFR = optionsAccessor.GetValueBoolean(nameof(ExcludeSaturatedStarsFromHFR), true);
@@ -381,9 +383,9 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection {
             }
             SaveIntermediateImages = false;
             PSFParallelPartitionSize = 100;
-            PSFResolution = 10;
+            PSFResolution = 20;
             PSFFitThreshold = 0.9;
-            UsePSFAbsoluteDeviation = false;
+            UsePSFAbsoluteDeviation = true;
             HotpixelThreshold = 0.001d;
             SaturationThreshold = 0.99d;
             ExcludeSaturatedStarsFromHFR = true;

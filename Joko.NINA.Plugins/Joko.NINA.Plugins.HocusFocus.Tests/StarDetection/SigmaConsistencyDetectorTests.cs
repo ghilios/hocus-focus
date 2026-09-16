@@ -1,4 +1,4 @@
-using NINA.Joko.Plugins.HocusFocus.Interfaces;
+﻿using NINA.Joko.Plugins.HocusFocus.Interfaces;
 using NINA.Joko.Plugins.HocusFocus.StarDetection;
 using NINA.Joko.Plugins.HocusFocus.Tests.Synthetic;
 using NINA.Joko.Plugins.HocusFocus.Utility;
@@ -126,25 +126,46 @@ namespace NINA.Joko.Plugins.HocusFocus.Tests.StarDetection {
         }
 
         [Test]
-        public async Task Detect_ConsistentPaths_ReuseStructureSigmaAsMeasurementSigma() {
+        public async Task Detect_NothingFiltersOrBlurs_ReusesStructureSigmaAsMeasurementSigma() {
+            // The ONE configuration in which the measurement image and the structure source still hold the same
+            // pixels: no hotpixel filtering and no noise reduction anywhere. Then a single estimate serves both.
+            using var image = BuildField();
+            var detector = new StarDetector(new AlglibAPI());
+            var p = new StarDetectorParams {
+                HotpixelFiltering = false,
+                StarMeasurementNoiseReductionEnabled = false,
+                NoiseReductionRadius = 0
+            };
+            using var clone = image.Clone();
+            var r = await detector.Detect(clone, p, null, CancellationToken.None);
+
+            Assert.That(r.MeasurementNoiseSigma, Is.EqualTo(r.StructureNoiseSigma),
+                "with no filtering and no blur the images are identical and must yield identical σ — today " +
+                "guaranteed by reusing the same estimate; a deterministic recompute refactor may relax this to Within(1e-12)");
+        }
+
+        [Test]
+        public async Task Detect_HotpixelFiltering_GivesTheMeasurementImageItsOwnSigma() {
+            // The measurement image and the structure source take DIFFERENT hotpixel filters: the structure source
+            // keeps the unconditional 3x3 median, the measurement image gets the isolation repair, which rewrites
+            // only genuine single-pixel spikes and so leaves the frame's noise standing. The measurement σ must
+            // therefore be its own estimate, and must be the LARGER of the two — the median is a noise suppressor.
             using var image = BuildField();
             var detector = new StarDetector(new AlglibAPI());
 
-            // Path 1: measurement noise reduction ON → srcImage is the blurred image → identical estimates.
-            var nrOn = new StarDetectorParams { StarMeasurementNoiseReductionEnabled = true, NoiseReductionRadius = 3 };
-            using var image1 = image.Clone();
-            var r1 = await detector.Detect(image1, nrOn, null, CancellationToken.None);
-            // Path 2: no noise reduction at all → no blur anywhere → identical estimates.
-            var noNr = new StarDetectorParams { StarMeasurementNoiseReductionEnabled = false, NoiseReductionRadius = 0 };
-            using var image2 = image.Clone();
-            var r2 = await detector.Detect(image2, noNr, null, CancellationToken.None);
+            // Radius 0 isolates the hotpixel filter: neither image gets a noise-reduction Gaussian.
+            var p = new StarDetectorParams {
+                HotpixelFiltering = true,
+                HotpixelThresholdingEnabled = false,
+                StarMeasurementNoiseReductionEnabled = false,
+                NoiseReductionRadius = 0
+            };
+            using var clone = image.Clone();
+            var r = await detector.Detect(clone, p, null, CancellationToken.None);
+            TestContext.WriteLine($"σ_measure={r.MeasurementNoiseSigma:F6} σ_structure={r.StructureNoiseSigma:F6}");
 
-            Assert.Multiple(() => {
-                Assert.That(r1.MeasurementNoiseSigma, Is.EqualTo(r1.StructureNoiseSigma),
-                    "with measurement NR on, the images are identical and must yield identical σ — today guaranteed by reusing the same estimate; a deterministic recompute refactor may relax this to Within(1e-12)");
-                Assert.That(r2.MeasurementNoiseSigma, Is.EqualTo(r2.StructureNoiseSigma),
-                    "with radius 0 the images are identical and must yield identical σ — today guaranteed by reusing the same estimate; a deterministic recompute refactor may relax this to Within(1e-12)");
-            });
+            Assert.That(r.MeasurementNoiseSigma, Is.GreaterThan(r.StructureNoiseSigma),
+                "the median-filtered structure source must read a smaller σ than the isolation-repaired measurement image");
         }
 
         [Test]

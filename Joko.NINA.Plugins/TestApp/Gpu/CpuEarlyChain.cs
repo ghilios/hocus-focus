@@ -1,4 +1,4 @@
-#region "copyright"
+﻿#region "copyright"
 
 /*
     Copyright © 2021 - 2026 George Hilios <ghilios+NINA@googlemail.com>
@@ -28,7 +28,7 @@ namespace TestApp.Gpu {
     public static class CpuEarlyChain {
         private const float AdaptiveBinarizationSigmaFloor = 1e-6f; // mirrors StarDetector's private const
 
-        public static GpuEarlyResult Run(Mat srcImage, GpuEarlyParams p, bool hotpixelAlreadyApplied, bool collectTimings) {
+        public static GpuEarlyResult Run(Mat srcImage, GpuEarlyParams p, bool hotpixelAlreadyApplied, bool collectTimings, Mat structureSource = null) {
             var result = new GpuEarlyResult { StageMs = collectTimings ? new Dictionary<string, double>() : null };
             var sw = Stopwatch.StartNew();
             void Record(string stage) {
@@ -42,15 +42,29 @@ namespace TestApp.Gpu {
             Record("H2D"); // clone stands in for the upload the GPU pays
 
             long hotpixelCount = 0;
+            long measurementHotpixelCount = 0;
             bool measurementMutated = false;
+            bool measurementDiffers = false;
             bool hotpixelFilteringApplied = hotpixelAlreadyApplied;
-            if (p.HotpixelFiltering || (p.NoiseReductionRadius > 0 && p.StarMeasurementNoiseReductionEnabled)) {
-                if (!hotpixelAlreadyApplied) {
-                    hotpixelCount = ApplyHotpixelFilter(meas, p);
-                    measurementMutated = true;
+
+            // Steps 1-3: the measurement/structure split (StarDetector.PrepareMeasurementAndStructureSources).
+            var noiseReduced = new Mat();
+            if (structureSource != null) {
+                structureSource.CopyTo(noiseReduced);
+                measurementDiffers = true;
+            } else {
+                meas.CopyTo(noiseReduced);
+                if (p.HotpixelFiltering || (p.NoiseReductionRadius > 0 && p.StarMeasurementNoiseReductionEnabled)) {
+                    if (!hotpixelAlreadyApplied) {
+                        hotpixelCount = ApplyHotpixelFilter(noiseReduced, p);
+                        measurementHotpixelCount = HotpixelFiltering.RepairIsolatedHotpixels(meas);
+                        measurementMutated = true;
+                        measurementDiffers = true;
+                    }
+                    hotpixelFilteringApplied = true;
                 }
-                hotpixelFilteringApplied = true;
             }
+
             bool noiseReductionApplied = false;
             if (p.NoiseReductionRadius > 0 && p.StarMeasurementNoiseReductionEnabled) {
                 CvImageUtility.ConvolveGaussian(meas, meas, p.NoiseReductionRadius * 2 + 1);
@@ -59,23 +73,22 @@ namespace TestApp.Gpu {
             }
             Record("SrcImagePreparation");
 
-            var noiseReduced = new Mat();
-            if (hotpixelFilteringApplied || noiseReductionApplied || p.NoiseReductionRadius <= 0) {
-                meas.CopyTo(noiseReduced);
-            } else {
-                meas.CopyTo(noiseReduced);
+            if (structureSource == null && !hotpixelFilteringApplied && p.NoiseReductionRadius > 0) {
                 hotpixelCount = ApplyHotpixelFilter(noiseReduced, p);
+                measurementDiffers = true;
             }
-            if (p.NoiseReductionRadius > 0 && !noiseReductionApplied) {
+            if (p.NoiseReductionRadius > 0) {
                 CvImageUtility.ConvolveGaussian(noiseReduced, noiseReduced, p.NoiseReductionRadius * 2 + 1);
+                if (!noiseReductionApplied) {
+                    measurementDiffers = true;
+                }
             }
             var structure = new Mat();
             noiseReduced.CopyTo(structure);
             Record("StructureMapPreparation");
 
             result.StructureNoise = CvImageUtility.KappaSigmaNoiseEstimate(noiseReduced, clippingMultipler: p.NoiseClippingMultiplier);
-            var measurementImageDiffers = p.NoiseReductionRadius > 0 && !noiseReductionApplied;
-            result.MeasurementNoise = measurementImageDiffers
+            result.MeasurementNoise = measurementDiffers
                 ? CvImageUtility.KappaSigmaNoiseEstimate(meas, clippingMultipler: p.NoiseClippingMultiplier)
                 : result.StructureNoise;
             Record("KSigma");
@@ -104,6 +117,8 @@ namespace TestApp.Gpu {
             }
             noiseReduced.Dispose();
             result.HotpixelCount = hotpixelCount;
+            result.MeasurementHotpixelCount = measurementHotpixelCount;
+            result.MeasurementDiffersFromStructure = measurementDiffers;
             return result;
         }
 

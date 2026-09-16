@@ -77,7 +77,7 @@ public class StarDetectionOptionsTests {
         options.PSFParallelPartitionSize = 200;
         options.PSFResolution = 12;
         options.PSFFitThreshold = 0.85;
-        options.UsePSFAbsoluteDeviation = true;
+        options.UsePSFAbsoluteDeviation = false;
         options.HotpixelThreshold = 0.01;
         options.SaturationThreshold = 0.95;
         options.MeasurementAverage = MeasurementAverageEnum.MeanOutliers;
@@ -112,7 +112,7 @@ public class StarDetectionOptionsTests {
             Assert.That(store.Snapshot["PSFParallelPartitionSize"], Is.EqualTo(200));
             Assert.That(store.Snapshot["PSFResolution"], Is.EqualTo(12));
             Assert.That(store.Snapshot["PSFFitThreshold"], Is.EqualTo(0.85));
-            Assert.That(store.Snapshot[nameof(StarDetectionOptions.UsePSFAbsoluteDeviation)], Is.True);
+            Assert.That(store.Snapshot[nameof(StarDetectionOptions.UsePSFAbsoluteDeviation)], Is.False);
             Assert.That(store.Snapshot[nameof(StarDetectionOptions.HotpixelThreshold)], Is.EqualTo(0.01));
             Assert.That(store.Snapshot[nameof(StarDetectionOptions.SaturationThreshold)], Is.EqualTo(0.95));
             Assert.That(store.Snapshot[nameof(StarDetectionOptions.MeasurementAverage)], Is.EqualTo(MeasurementAverageEnum.MeanOutliers));
@@ -828,7 +828,7 @@ public class StarDetectionOptionsTests {
     [TestCase(nameof(StarDetectionOptions.UseAutoFocusCrop), false)]
     [TestCase(nameof(StarDetectionOptions.HotpixelFiltering), false)]
     [TestCase(nameof(StarDetectionOptions.HotpixelThresholdingEnabled), false)]
-    [TestCase(nameof(StarDetectionOptions.UsePSFAbsoluteDeviation), true)]
+    [TestCase(nameof(StarDetectionOptions.UsePSFAbsoluteDeviation), false)]
     [TestCase(nameof(StarDetectionOptions.DefocusAwareGates), true)]
     [TestCase(nameof(StarDetectionOptions.DefocusDistortionSizeReference), 25.0)]
     [TestCase(nameof(StarDetectionOptions.DefocusDistortionMinFactor), 0.3)]
