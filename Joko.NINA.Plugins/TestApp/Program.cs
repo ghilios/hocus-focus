@@ -153,6 +153,13 @@ namespace TestApp {
                 return;
             }
 
+            // Per-star measurement probe: `TestApp star-probe --image <frame> [--near x,y] [--psf-sweep]`.
+            // Dumps HFR, FWHM, the structure bounding box and the PSF fit's sampling grid for every accepted star.
+            if (args.Length > 0 && args[0].Equals("star-probe", StringComparison.OrdinalIgnoreCase)) {
+                await StarProbeRunner.Run(args);
+                return;
+            }
+
             // Minimal CSV-driven annotator: `TestApp annotate --image <frame> --stars <csv> ...` (or --runs).
             // Overlays an external star list on the real plugin MTF stretch; also exports plain stretched PNGs.
             if (args.Length > 0 && args[0].Equals("annotate", StringComparison.OrdinalIgnoreCase)) {

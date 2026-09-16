@@ -88,6 +88,36 @@ set's median gradient slope/eccentricity vs sensitivity, from a single run); plu
 flag is false the detector fills no per-sector residual arrays and skips the diagnostic record (the plane fit
 + decision always run, since they are the production background/contamination path).
 
+## Per-star measurement probe (`star-probe`)
+
+Use when a star's HFR or FWHM looks wrong and you need to know *why*: it dumps every quantity each measurement
+was derived from, which `contamination`'s CSV does not carry. Worked example:
+`docs/saturated-star-fwhm-investigation-results.md`.
+
+```bash
+dotnet Joko.NINA.Plugins/TestApp/bin/Debug/net8.0-windows7.0/TestApp.dll star-probe \
+  --image "C:\path\frame.xisf" --settings "C:\path\harness_settings.json" \
+  --out "C:\temp\probe" --near 4707,3262 --radius 260 --psf-sweep
+```
+
+- Args: `--image` (req), `--settings` / `--profile-id` (same pinning rules as every harness runner), `--out`
+  (default `%LOCALAPPDATA%\NINA\Logs\hf-diag\star-probe\<timestamp>`), `--near <x,y>` + `--radius <px>`
+  (default 250) to select the console table, `--top <n>` (default 25; brightest first), `--psf-sweep`.
+- Detects through `DetectionSource` like every other runner, forces `ModelPSF` on, applies the options'
+  `DetectionBinning` the way `ApplyDetectionImageContext` does, and takes the pixel scale from the frame header.
+- **`star_probe.csv`** (one row per accepted star): centre, structure box, background, peak, HFR and the HFR
+  aperture (`min(boxW, boxH)/2`), the full PSF fit (FWHM px/arcsec, sigmas, theta, eccentricity, R^2, reduced
+  chi^2, fitted amplitude and background, beta), the PSF sampling step, and a census of the PSF sample grid —
+  how many samples the saturation mask dropped, and saturated pixels in the box.
+- **`--psf-sweep`** refits each selected star at `PSFResolution` 30/60, without the saturation mask, and over a
+  halved box, using the detector's own measurement noise sigma. Its `base` column must reproduce the detected
+  `fwhmPx`; if it does not, the reconstructed measurement image is wrong and the other columns mean nothing.
+- **Unbinned mono only for the census and the sweep.** They run against a reconstruction (display Mat + the same
+  hot-pixel filter). A bayered frame is CFA-filtered before its debayer and a `DetectionBinning > 1` frame is
+  fitted in binned pixels, so for those the census columns are left empty and the sweep is skipped.
+- The amplitude bound shows up here: a fitted `psfPeak` of exactly `2` (with `psfBackground` 0) is a fit pinned
+  at its limits, not a measurement.
+
 ## Star Detection Optimizer harnesses (`optimize` / `review` / `diagnose-labels`)
 
 The Star Detection Optimization Wizard ships with `TestApp` subcommands that drive the **same**

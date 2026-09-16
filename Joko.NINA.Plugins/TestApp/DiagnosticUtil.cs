@@ -196,6 +196,10 @@ namespace TestApp {
         /// <summary>True when this frame is carried as an <see cref="IRenderedImage"/> (the live-parity route).</summary>
         public bool IsRendered => rendered != null;
 
+        /// <summary>The frame's own header metadata (pixel size, focal length, exposure), or null for a .tif —
+        /// which carries none. Feeds <c>HarnessSettingsStore.PixelScaleForFrame</c>.</summary>
+        public NINA.Image.ImageData.ImageMetaData MetaData => rendered?.RawImageData?.MetaData;
+
         public static async Task<DetectionSource> LoadAsync(string path, IProfileService profileService) {
             if (DiagnosticUtil.IsNinaLoaderFormat(path)) {
                 var image = await DiagnosticUtil.LoadRenderedImage(path, profileService).ConfigureAwait(false);
