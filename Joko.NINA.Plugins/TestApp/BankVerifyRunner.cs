@@ -287,6 +287,14 @@ namespace TestApp {
             // (the entire real bank, and any synthetic dataset predating this field) the CLI/default value applies
             // unchanged.
             var syntheticMatchRadius = SyntheticDatasetMeta.TryReadMatchRadiusPx(runFolder, runsRoot);
+            // Synthetic bank only: the focuser position best focus was rendered at, and the tilt that was
+            // rendered. Turns AF scoring from "how precise does the fit claim to be" into "how far off is it",
+            // and makes the sensor model's recovered tilt checkable against a known value.
+            var renderedTruth = SyntheticDatasetMeta.TryReadRenderedTruth(runFolder, runsRoot);
+            if (renderedTruth?.OptimalFocuserPosition != null) {
+                Console.WriteLine($"  rendered truth: optimalFocus={Fmt(renderedTruth.OptimalFocuserPosition.Value)}, " +
+                    $"tilt={Fmt(renderedTruth.TiltAmountMicrons ?? double.NaN)}um @ {Fmt(renderedTruth.TiltAngleDegrees ?? double.NaN)}deg");
+            }
             var effectiveMatchRadius = syntheticMatchRadius ?? matchRadius;
             var matchRadiusSource = syntheticMatchRadius.HasValue ? "synthetic_meta.json" : "CLI/default";
             Console.WriteLine($"  matchRadius: {Fmt(effectiveMatchRadius)}px ({matchRadiusSource})");
@@ -353,6 +361,8 @@ namespace TestApp {
             rr.pixelScale = effectivePixelScale;
             rr.pixelScaleSource = pixelScaleSource;
             rr.matchRadius = effectiveMatchRadius;
+            rr.truthOptimalFocuser = renderedTruth?.OptimalFocuserPosition;
+            rr.truthTiltMicrons = renderedTruth?.TiltAmountMicrons;
             rr.matchRadiusSource = matchRadiusSource;
             rr.scoringMode = scoringMode;
             rr.protectedStars = protectedStars;
@@ -376,7 +386,7 @@ namespace TestApp {
                 }
                 p.AdaptiveNoiseBlockSize = adaptiveBlockSize;
                 var cm = await ScoreConfigAsync($"C0@nc{nc:0.#}", nc, false, p, evalData, loaded, goldenByFocuser, truthByFocuser, effectiveMatchRadius,
-                    inspectorOptions, alglib, profileService, activeProfile, stepSize, detector, afOptions);
+                    inspectorOptions, alglib, profileService, activeProfile, stepSize, detector, afOptions, renderedTruth?.OptimalFocuserPosition);
                 rr.configs.Add(cm);
                 Console.WriteLine($"    {cm.config}: recall@high={Fmt(cm.recallHigh)} prec={Fmt(cm.precision)} sigma={Fmt(cm.sigmaFocus)} sR^2={Fmt(cm.sR2)} aligned={cm.framesAligned}/{loaded.Count}");
             }
@@ -387,7 +397,7 @@ namespace TestApp {
                 var p = BaseDefault();
                 OverlayOptimized(p, aSettings, forceDonutMaster: false);
                 var cm = await ScoreConfigAsync("A", p.NoiseClippingMultiplier, p.DefocusAwareDonutDetection, p, evalData, loaded, goldenByFocuser, truthByFocuser, effectiveMatchRadius,
-                    inspectorOptions, alglib, profileService, activeProfile, stepSize, detector, afOptions);
+                    inspectorOptions, alglib, profileService, activeProfile, stepSize, detector, afOptions, renderedTruth?.OptimalFocuserPosition);
                 cm.sensitivity = p.Sensitivity;
                 rr.configs.Add(cm);
                 Console.WriteLine($"    A (opt donutOFF, NC->{Fmt(cm.nc)}): recall@high={Fmt(cm.recallHigh)} prec={Fmt(cm.precision)} sigma={Fmt(cm.sigmaFocus)} sR^2={Fmt(cm.sR2)}");
@@ -399,7 +409,7 @@ namespace TestApp {
                 var p = BaseDefault();
                 OverlayOptimized(p, bSettings, forceDonutMaster: true);
                 var cm = await ScoreConfigAsync("B", p.NoiseClippingMultiplier, true, p, evalData, loaded, goldenByFocuser, truthByFocuser, effectiveMatchRadius,
-                    inspectorOptions, alglib, profileService, activeProfile, stepSize, detector, afOptions);
+                    inspectorOptions, alglib, profileService, activeProfile, stepSize, detector, afOptions, renderedTruth?.OptimalFocuserPosition);
                 cm.sensitivity = p.Sensitivity;
                 rr.configs.Add(cm);
                 Console.WriteLine($"    B (opt donutON, NC->{Fmt(cm.nc)}): recall@high={Fmt(cm.recallHigh)} prec={Fmt(cm.precision)} sigma={Fmt(cm.sigmaFocus)} sR^2={Fmt(cm.sR2)}");
@@ -422,7 +432,7 @@ namespace TestApp {
             List<(int focuser, string path, IRenderedImage image)> loaded, Dictionary<int, GoldenFrame> goldenByFocuser,
             Dictionary<int, IReadOnlyList<SyntheticStarDisposition>> truthByFocuser, double matchRadius,
             InspectorOptions inspectorOptions, AlglibAPI alglib, ProfileService profileService, NINA.Profile.Interfaces.IProfile activeProfile, int stepSize,
-            StarDetector detector, AutoFocusOptions afOptions) {
+            StarDetector detector, AutoFocusOptions afOptions, double? truthFocuserPosition) {
 
             // effectiveSensitivity is set HERE, from the same params the config is scored with, so C0/A/B all get it
             // from one place (the A/B call sites re-stamp `sensitivity` afterwards; the effective gate must not
@@ -436,6 +446,10 @@ namespace TestApp {
             Prog($"  [{label}] EvaluateAndFitAsync start (NC={nc}, donut={donut})");
             var af = await evalData.EvaluateAndFitAsync(p, CancellationToken.None);
             cm.sigmaFocus = af.Metrics.SigmaFocus; cm.afR2 = af.Metrics.RSquared; cm.afChi = af.Metrics.ReducedChiSquared;
+            cm.afBestFocus = af.Metrics.BestFocusPosition;
+            if (truthFocuserPosition.HasValue && !double.IsNaN(cm.afBestFocus)) {
+                cm.afFocusErrorSteps = cm.afBestFocus - truthFocuserPosition.Value;
+            }
             Prog($"  [{label}] EvaluateAndFitAsync done sigma={cm.sigmaFocus:F3}; detect loop start");
 
             // Detect each frame once → golden P/R + sensor-model star lists.
@@ -799,7 +813,12 @@ namespace TestApp {
             public string pixelScaleSource { get; set; }
             // V-P2: the effective centroid match radius (px) this run's golden P/R was scored at, and whether it
             // came from the dataset's own synthetic_meta.json or the CLI/default.
-            public double matchRadius { get; set; } = double.NaN;
+            public double matchRadius { get; set; }
+
+            /// <summary>Rendered ground truth (synthetic bank only; null on the real bank).</summary>
+            public double? truthOptimalFocuser { get; set; }
+
+            public double? truthTiltMicrons { get; set; } = double.NaN;
             public string matchRadiusSource { get; set; }
             // F31: "golden+truth-protected" when a per-frame truth sidecar was found and its real-but-unboxed
             // stars (omitted / merged-into) were excluded from false-positive scoring; "golden" otherwise (the
@@ -850,6 +869,13 @@ namespace TestApp {
             /// correct whatever tier the golden policy gave it. Non-zero means F31 has regressed and this run's
             /// precision is not trustworthy. Always 0 on the real bank, which has no truth sidecar.</summary>
             public int truthViolations { get; set; }
+
+            /// <summary>The AF fit's own best-focus position, and its SIGNED error against the focuser position
+            /// the renderer actually placed best focus at. NaN outside the synthetic bank, which carries no
+            /// truth. This is absolute AF accuracy; sigmaFocus is only the fit's self-reported precision.</summary>
+            public double afBestFocus { get; set; } = double.NaN;
+
+            public double afFocusErrorSteps { get; set; } = double.NaN;
             /// <summary>Protection EXERCISED: how many detections <c>TruthProtection.ExcludeProtected</c> actually
             /// removed from this config's false-positive count. The run-level <c>protectedStars</c> is protection
             /// AVAILABLE and was, until W27, the only one of the pair reported — a run can carry hundreds of

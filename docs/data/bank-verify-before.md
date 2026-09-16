@@ -1,6 +1,6 @@
 # AF-bank verification -- 19 run(s)
 
-generated: 20260916T165754Z  |  detector commit: before  |  NoiseClip default = 4  |  pixel-scale mode: header  |  NC sweep: 4
+generated: 20260916T181139Z  |  detector commit: before  |  NoiseClip default = 4  |  pixel-scale mode: header  |  NC sweep: 4
 
 ## NoiseClippingMultiplier sweep (C0 as-default -- the honest recall reference)
 

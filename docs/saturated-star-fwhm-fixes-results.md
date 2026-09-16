@@ -231,41 +231,75 @@ with 5000 stars the PSF stage now runs about 21 s rather than 2 s.
 
 ---
 
-## Part 3 — Does losing faint stars cost anything? (AF-bank verification)
+## Part 3 — Autofocus and sensor-model quality across the AF bank
 
-**RETRACTED AND BEING RE-RUN. The numbers that stood here were not measured on comparable arms.**
+`bank-verify` over all 19 runs of `D:\Autofocus Bank`, C0 as-default at `NoiseClippingMultiplier` 4, before vs
+after, **with `--settings` pinned to one file for both arms and both reports recording the same profile**.
 
-The two `bank-verify` arms were launched without `--settings`, so each read whatever the default settings path
-resolved to for its own binary directory. They got different files: the before arm a 68-key bag exported from
-profile `astrodet`, the after arm a 44-key bag exported from profile `Default`. The reports also record different
-`profileId` values, so the two arms did not even load the same NINA profile. Every number in that comparison —
-recall, precision, sigma_focus, the sensor model — is confounded.
+> An earlier version of this section was measured on arms that had been launched WITHOUT `--settings`. They read
+> different option bags (68 keys from profile `astrodet` versus 44 from `Default`) and loaded different NINA
+> profiles. Detection was unaffected, because C0 builds its params from
+> `BuildDefaultStarDetectorParams` rather than the file, so the recall and precision numbers were right by luck.
+> The autofocus and sensor columns were not: they read the inspector and AF options from the file, and the
+> visible symptom was a "uniform 4x shrink" in the sensor model's residual and recovered tilt that does not
+> exist. See the guard note at the end of this section.
 
-That is also the whole of the "uniform 4x sensor RMS" this section previously reported as an unexplained scale
-change. Re-running one bank run (`Panos`) through the same `SensorModel.RegisterStarsAndFit` seam with
-`inspect-align --params default`, one build after the other, on the same profile and settings:
+### Detection
 
-| | before | after |
-|---|---|---|
-| Gx, Gy | 0.0655, 0.0748 | 0.0701, 0.0836 |
-| tilt magnitude `atan(sqrt(Gx^2+Gy^2))` | 5.71 deg | 6.23 deg |
-| RMS residual (microns) | 303.3 | 208.3 |
-| goodness of fit | 0.9880 | 0.9940 |
-| stars in model | 210 | 209 |
+| | mean before | mean after | better / worse / tied |
+|---|---|---|---|
+| recall @ SNR >= 12 | 0.6056 | 0.6502 | **13 / 1 / 3** |
+| recall @ all tiers | 0.4653 | 0.4944 | **13 / 1 / 3** |
+| precision | 0.9540 | 0.9504 | 4 / 8 / 5 |
+| detections | 6169 | 6360 | 13 / 1 / 5 |
 
-The sensor fit **improves** (residual -31%, goodness of fit 0.988 -> 0.994) on the same star population, and the
-recovered tilt is essentially unchanged. There was never a 4x.
+Recall against the high-confidence golden tier improves on 13 of 17 scorable runs and drops on one (`vsn07`,
+0.726 -> 0.668). Precision's median change is exactly zero. The stars the change gains are real golden stars.
 
-Parts 1 and 2 are unaffected: both `star-probe` arms and both `psf-bank` arms were run against an explicitly
-pinned settings file, which the logs record.
+### Sensor model
 
-A corrected before/after verification with `--settings` pinned for both arms is running; this section will be
-replaced by its result.
+| | mean before | mean after | better / worse / tied |
+|---|---|---|---|
+| R^2 | 0.7376 | 0.7588 | **11 / 4 / 3** |
+| RMS residual (microns) | 50.22 | 37.65 | 8 / 7 / 3 |
+| stars in model | 470.7 | 480.7 | 10 / 2 / 7 |
 
-**The guard this needed.** `bank-verify` now records `settingsPath`, `settingsPinned` and the profile in both the
-JSON and the report header, prints the comparability line under the header, and writes a loud stderr warning when
-`--settings` was not given. `fitInputs`, which existed to make two reports comparable, did not catch this: its
-four AF-fit values happened to agree across the two different files.
+The fit is better or neutral. **Recovered tilt is essentially unchanged run by run** — 0.03/0.03, 0.31/0.31,
+0.52/0.51, 0.80/0.84, 5.99/6.33 degrees and so on — with one exception, `lumos` (2.74 -> 0.63), whose fit also
+improved (R^2 0.975 -> 0.987) and which is one of the two runs with no scorable recall at all.
+
+### Autofocus
+
+This is the one place with a mild negative signal.
+
+| | median ratio after/before | p10 | p90 | better / worse / tied |
+|---|---|---|---|---|
+| sigma_focus (lower better) | 1.000 | 0.847 | 1.858 | 6 / 9 / 4 |
+| fit R^2 (higher better) | 1.000 | 0.989 | 1.000 | 5 / 10 / 4 |
+| reduced chi^2 (lower better) | 1.018 | 0.685 | 3.343 | 4 / 11 / 4 |
+
+The median run is unchanged on all three, but the tail is asymmetric: more runs get slightly worse than get
+better, and a few get materially worse. Sorted by the ratio, the worst are `caboose` (1.309 -> 3.557 steps,
+2.7x), `fmeschia_Focus` (9.785 -> 18.182, 1.9x), `vsn07` (2.474 -> 4.004, 1.6x) and `muggsie`
+(15.143 -> 18.978, 1.3x); the best by far is `FlyData` (4.474 -> 1.653, 0.37x).
+
+**The worst AF runs are the runs whose recall improved most.** `caboose` goes 0.808 -> 0.954 recall and
+`fmeschia_Focus` 0.702 -> 0.947. With the measurement image no longer median-suppressed, peak brightness rises
+and more faint stars clear the gate at the default Sensitivity of 10.0. Those extra stars are real, and they are
+also the noisiest, so the frame's HFR median gets a wider spread and the curve fit's self-reported uncertainty
+widens with it. It is a detection/precision trade, not a broken fit: fit R^2 barely moves (p10 0.989).
+
+Whether a wider sigma_focus means autofocus actually lands further from true focus is a question this bank
+cannot answer, because it has no ground truth. Part 4 measures it where truth exists.
+
+### The guard this section needed
+
+`HarnessSettingsStore`'s default path resolves per machine **and per binary directory**, which is what let two
+arms diverge in silence while each printed a plausible `Settings:` banner. `bank-verify` now records
+`settingsPath` and `settingsPinned` beside `profileId` in the JSON, prints both under the report header with an
+explicit comparability line, and writes a loud stderr warning when `--settings` was omitted. `fitInputs` existed
+to make two reports comparable and did not catch this: its four AF-fit values happened to agree across the two
+different files.
 
 ---
 
