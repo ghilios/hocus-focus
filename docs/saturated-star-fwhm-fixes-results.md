@@ -303,6 +303,92 @@ different files.
 
 ---
 
+## Part 4 — The synthetic bank: absolute autofocus accuracy, and a tilt null test
+
+All 22 datasets of `D:\SyntheticAutofocusBank`, same harness, same pinned settings, same profile. The synthetic
+bank carries rendered ground truth, which makes two things measurable that the real bank cannot answer:
+
+- **Absolute autofocus accuracy.** `bank-verify` now reads `OptimalFocuserPosition` from `synthetic_meta.json`
+  and scores the signed error between it and the fitted best focus. That is accuracy, not the fit's own
+  self-reported precision.
+- **A sensor-model null test.** Every dataset renders `TiltAngleDegrees = 0` and `TiltAmountMicrons = 0`, so any
+  recovered tilt is invented. This measures spurious tilt; it cannot measure tilt accuracy.
+
+### Autofocus lands in the same place
+
+| | mean before | mean after | median before | median after |
+|---|---|---|---|---|
+| \|focus error\| (focuser steps) | 0.2334 | 0.2125 | 0.0392 | 0.0519 |
+| sigma_focus | 0.8434 | 0.9014 | 0.6954 | 0.6627 |
+| fit R^2 | 0.9566 | 0.9492 | 0.9991 | 0.9990 |
+
+Nine datasets get closer to truth and 13 get further, but **read the units**: these are fractions of a single
+focuser step, on rigs whose steps are 2 to 5 microns. The median error moves 0.039 -> 0.052 steps, which is
+about a tenth of a micron. The worst dataset either way is `D13_apo200_1800mm` at 1.5 steps, roughly 3 microns.
+Both arms land on true focus to far inside anything that matters.
+
+**This is the answer Part 3 could not give.** The real bank showed sigma_focus widening on a few runs; the
+synthetic bank shows that the fitted position does not actually move away from truth. The widened uncertainty is
+the curve honestly reporting a noisier input, not autofocus getting worse at its job.
+
+### The sensor model invents no tilt
+
+| | mean before | mean after |
+|---|---|---|
+| \|recovered tilt\| (degrees, truth 0) | 0.0026 | 0.0026 |
+| RMS residual (microns) | 0.7304 | 0.6299 |
+| R^2 | 0.0937 | 0.1058 |
+
+Recovered tilt is identical to four decimal places, at 0.003 degrees against a truth of zero. The residual
+improves on 18 of 21 datasets. (R^2 is near zero in both arms because there is no tilt for the paraboloid to
+explain, which is the correct answer on a flat field.)
+
+### Detection: precision perfect, recall slightly down, and a different mechanism
+
+Precision is **1.000 in both arms on all 22 datasets**: against exact rendered truth, neither arm produces a
+single false positive. Recall against the high-confidence tier goes the other way from the real bank, though:
+mean 0.7823 -> 0.7602, worse on 7 datasets, better on 3, tied on 12. The losses concentrate on
+`D04_esprit_550mm` (0.814 -> 0.665), `D16_esprit550_ha3` (0.870 -> 0.679), `D18_m24_deep_shed` (0.795 -> 0.658)
+and `D20_m24_bright_control` (0.953 -> 0.858).
+
+The reason the two banks disagree is that **the synthetic frames have almost no hot pixels**. A census of one
+D18 frame finds 134 isolated hot pixels; the real investigated frame has 223 982. So the synthetic bank
+exercises only half of this change, the half where the measurement image loses its blur, with none of the
+compensating benefit of actually removing hot pixels. It is a worst case for the change, deliberately so.
+
+Detection on that same D18 frame, before and after, accounts for the loss exactly:
+
+| | before | after |
+|---|---|---|
+| structure candidates | 9225 | 9225 |
+| detected | 395 | 301 |
+| rejected: too low HFR | 3047 | **3125** |
+| rejected: not centered | 577 | **605** |
+| rejected: too flat | 52 | 43 |
+| rejected: low sensitivity | 5 | 2 |
+| rejected: too small / too distorted | 4727 / 405 | 4727 / 405 |
+
+Candidate formation is bit-identical, as designed. The 94 lost stars are +78 to the **MinHFR floor** and +28 to
+the **centering tolerance**, partly offset elsewhere. With the measurement image no longer smoothed, stars
+measure sharper, so more of them fall under the 1.2 px `MinHFR` floor, and their centroids shift enough for a
+few more to exceed `StarCenterTolerance`.
+
+Note this is a *different* mechanism from the investigated frame in Part 1, where the loss was almost entirely
+the sensitivity gate. Which gate bites depends on the rig and the settings:
+
+| | dominant mechanism | star count |
+|---|---|---|
+| the investigated frame (Sensitivity 13.67, hot-pixel-rich) | sensitivity gate | -17% |
+| the real bank at defaults | none; hot-pixel removal offsets the losses | wash |
+| the synthetic bank (no hot pixels, sharp stars) | MinHFR floor, then centering | -24% on D18 |
+
+**`MinHFR` is the same class of exposure as Brightness Sensitivity.** Its 1.2 px default was itself calibrated
+against noise-inflated faint HFRs; honest HFR is lower still, so the same number is a stricter floor than it was.
+Nothing here forces a change, since precision stays perfect and autofocus accuracy is unmoved, but it is the
+knob to reach for if a clean, sharp-star rig loses stars it wants.
+
+---
+
 ## GPU parity
 
 The GPU early span is documented as an exact mirror of the CPU pipeline, so the isolation repair was written as
@@ -344,7 +430,8 @@ $EXE psf-bank --runs "D:\Autofocus Bank" --out <dir> --manifest <dir>\psf_bank_m
 The bank verification and GPU parity:
 
 ```bash
-$EXE bank-verify --runs "D:\Autofocus Bank" --out <dir> --nc-sweep 4 --match-radius 12 --commit <hash>
+$EXE bank-verify --runs "D:\Autofocus Bank"        --out <dir> --settings <one file> --nc-sweep 4 --match-radius 12 --commit <hash>
+$EXE bank-verify --runs "D:\SyntheticAutofocusBank" --out <dir> --settings <one file> --nc-sweep 4 --match-radius 12 --commit <hash>
 $EXE bench-gpu --compare --image "<frame>.xisf"
 ```
 
@@ -353,4 +440,5 @@ step disabled. See `.claude/docs/testapp-cli.md`.
 
 The raw outputs every table above is computed from are committed under `docs/data/`:
 `psf-bank-before.csv` / `psf-bank-after.csv` (per run), `psf-bank-sub_res*.csv` (the four timing-decomposition
-arms), and `bank-verify-before.md` / `bank-verify-after.md`.
+arms), `bank-verify-before.md` / `bank-verify-after.md` (the real bank) and `synth-verify-before.md` /
+`synth-verify-after.md` (the synthetic bank).
