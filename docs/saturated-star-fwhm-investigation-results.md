@@ -14,8 +14,11 @@ All numbers are from this one frame.
 
 - **The saturated star's FWHM (6.06 px vs 3.8-4.1 px for its neighbours).** Its PSF is identical to its
   neighbours'. The PSF fit masks its clipped core, leaving a wing-only fit whose width the data cannot determine;
-  the fitted amplitude runs into the solver's `A <= 2.0` bound and the width absorbs the rest. Removing the bound
-  does not recover the true width, so the fit should be rejected for saturated stars.
+  the fitted amplitude runs into the solver's `A <= 2.0` bound and the width absorbs the rest. With the production
+  fit, removing the bound does not recover the true width. With `PSFResolution = 20` and
+  `UsePSFAbsoluteDeviation = true`, lightly clipped stars already measure within 3% of their neighbours, and
+  removing the bound brings the heavily clipped one from +49% to +12% — but that rests on a single star, so
+  rejecting saturated fits remains the safe default.
 - **Its HFR (3.84 vs 2.54 px).** ~95% of the excess is the flat clipped core under-weighting the centre (already
   documented as accuracy analysis F14). The larger aperture a bright star gets contributes almost nothing.
 - **The frame's FWHM spread.** 39% of the variance is a real top-to-bottom focus gradient; the rest is mostly
@@ -42,11 +45,14 @@ In order of impact on this rig.
    every FWHM and shows the focus gradient ~43% larger. Per-star precision drops ~20%, which does not reach the
    frame-level median.
 5. **Code change: skip the PSF fit for saturated stars** (`Background + PeakBrightness >= SaturationThreshold`).
-   Fixes the per-star numbers; does not visibly change `FWHMMAD`.
+   Fixes the per-star numbers; does not visibly change `FWHMMAD`. With recommendation 3 in place only heavily
+   clipped stars stay badly wrong, and raising the amplitude bound as well cut the one such star here from +49% to
+   +12% — too little evidence to replace rejection.
 
-**Measured and no help:** raising or removing the amplitude bound, gating the fit on reduced chi-squared, any
-other `PSFFitType`, `PSFPixelIntegration` (lowers the median 0.054 px but tightens nothing), a larger
-`StarBackgroundBoxExpansion`, raising `HotpixelThreshold`, and turning `HotpixelFiltering` off.
+**Measured and no help:** gating the fit on reduced chi-squared, any other `PSFFitType`, `PSFPixelIntegration`
+(lowers the median 0.054 px but tightens nothing), a larger `StarBackgroundBoxExpansion`, raising
+`HotpixelThreshold`, and turning `HotpixelFiltering` off. **Raising or removing the amplitude bound** changes no
+frame-level statistic under any settings tested; it only moves heavily clipped stars (Part 1).
 
 **Not measured, but avoid:** `StarMeasurementNoiseReductionEnabled` Gaussian-blurs the measurement image (kernel
 `2 x NoiseReductionRadius + 1`), which can only widen every star.
@@ -94,8 +100,9 @@ A constant ratio across the unclipped range means one profile is a scaled copy o
 ### Brightening an unsaturated star reproduces the artifact
 
 Take the neighbour at (4821, 3192), multiply its signal by `k`, clip at full well, apply the 3x3 hot-pixel median
-— in that order, as the sensor and then the detector do — and fit it exactly as the detector does (Moffat beta=4,
-saturated samples masked) over the bright star's 25x24 box. Its true FWHM, 3.989 px, never changes:
+— in that order, as the sensor and then the detector do — and fit it exactly as the detector does with production
+settings (Moffat beta=4, plain least squares, `PSFResolution = 10`, saturated samples masked) over the bright
+star's 25x24 box. Its true FWHM, 3.989 px, never changes:
 
 | k | peak / full well | masked samples | FWHM, `A <= 2` (production) | error | FWHM, amplitude uncapped | uncapped A | error |
 |---|---|---|---|---|---|---|---|
@@ -113,13 +120,16 @@ saturated samples masked) over the bright star's 25x24 box. Its true FWHM, 3.989
 At `k = 21`, the measured brightness ratio, the simulated star reports **FWHM 6.070 px** and **HFR 3.893 px**
 against the real star's **6.060** and **3.838**. Brightness and clipping alone reproduce it.
 
-The uncapped columns show the amplitude bound is not the fix. From `k = 4` on, the unconstrained fit wants an
-amplitude above 2 (2.2 to 10.6), so the bound binds throughout — but removing it leaves an error that wanders
-between **-13% and +27%** with no trend to correct for.
+With this production fit, the uncapped columns show the amplitude bound is not the fix. From `k = 4` on, the
+unconstrained fit wants an amplitude above 2 (2.2 to 10.6), so the bound binds throughout — but removing it leaves
+an error that wanders between **-13% and +27%** with no trend to correct for. This ladder has not been run through
+the robust fit (`UsePSFAbsoluteDeviation`); see *Raising the bound with the recommended settings* for what the real
+star does.
 
 ### The width is not identifiable from the wings
 
-Real bright star, core masked, amplitude **fixed** at a series of values, everything else free:
+Real bright star, core masked, production least-squares fit, amplitude **fixed** at a series of values, everything
+else free:
 
 | A fixed | sigX | sigY | FWHM px | R^2 |
 |---|---|---|---|---|
@@ -141,6 +151,9 @@ the bound pins `A` at the largest-FWHM end of that valley. Letting the fit go fu
 | uncapped, saturation mask dilated 5 px | 78/100 | 1.308 | 5.694 | +43% | 0.993 |
 | uncapped, saturation mask dilated 9 px | 55/100 | 0.500 | 7.013 | +76% | 0.970 |
 
+(These are refits outside the detector. The detector's own solver, rebuilt with the bound removed, gives 5.07 px
+with A = 3.116 for the uncapped row.)
+
 Dilating the mask, to drop the shoulder samples that the hot-pixel median smeared the clipped plateau into, only
 throws away the last informative samples. Changing the sampling does not matter either (`--psf-sweep` refits of the real
 star, production fit otherwise):
@@ -155,13 +168,62 @@ star, production fit otherwise):
 **Where the bound is.** `upperBounds[0] = 2.0d`, in normalised [0,1] image units, in all four solver entry
 points:
 
-| file | line | used by |
-|---|---|---|
-| `StarDetection/PSFModeler.cs` | 235 (`Solve`), 353 (`SolveIRLS`) | `PSFModelTypeAlglibBase` -> Gaussian |
-| `StarDetection/MoffatPSFType.cs` | 308 (`Solve`), 376 (`SolveIRLS`) | Moffat (fixed and fittable beta) |
+| file | line | method | used by |
+|---|---|---|---|
+| `StarDetection/PSFModeler.cs` | 353 | `PSFModelTypeAlglibBase.Solve` | Gaussian and fixed-beta Moffat (`Moffat_40`, `Moffat_25`, `Moffat_15`), `UsePSFAbsoluteDeviation` off |
+| `StarDetection/PSFModeler.cs` | 235 | `PSFModelTypeAlglibBase.SolveIRLS` | the same types, `UsePSFAbsoluteDeviation` on |
+| `StarDetection/MoffatPSFType.cs` | 308 | `FittableMoffatPSFAlglibType.Solve` | `MoffatFittable`, `UsePSFAbsoluteDeviation` off |
+| `StarDetection/MoffatPSFType.cs` | 376 | `FittableMoffatPSFAlglibType.SolveIRLS` | `MoffatFittable`, `UsePSFAbsoluteDeviation` on |
 
-It can only ever bind on a clipped star: exactly 5 of this frame's 1511 accepted fits have a fitted amplitude above
-1.0, and they are precisely the 5 stars flagged saturated. Raising it changes nothing for any star worth keeping.
+It can only ever bind on a clipped star: with the production fit and with `PSFResolution = 20` + Huber alike,
+exactly 5 of this frame's accepted fits have a fitted amplitude above 1.0, and they are precisely the 5 stars
+flagged saturated.
+
+### Raising the bound with the recommended settings
+
+Measured with the detector's own solver: a temporary build (not committed; isolated worktree with the NINA deploy
+step removed) read the bound from a file. At bound 2 it reproduced the unmodified `PSFResolution = 20` + Huber run
+on all 1737 stars, with no FWHM or fit-acceptance difference.
+
+Which stars change when the bound is raised:
+
+| settings | bound | stars whose FWHM changes | fits newly accepted / rejected |
+|---|---|---|---|
+| production | 2 -> removed | 3, all saturated: (4707, 3261) 6.059 -> 5.070; (5066, 812) 3.435 -> 3.130; (6864, 522) 3.639 -> 3.492 | 0 / 0 |
+| `PSFResolution = 20` + Huber | 2 -> 10 | 1, saturated: (4707, 3261) 5.806 -> 4.380 (A 2.000 -> 5.245, R^2 0.914 -> 0.955) | 0 / 0 |
+| `PSFResolution = 20` + Huber | 10 -> removed | none | 0 / 0 |
+
+Each saturated star against the median FWHM of the unsaturated, above-median-peak stars within 900 px, measured in
+the same run:
+
+| star (x, y) | saturated px | production, bound 2 | production, no bound | res20 + Huber, bound 2 | res20 + Huber, no bound |
+|---|---|---|---|---|---|
+| 3840, 2542 | 3 | 3.40 vs 3.99 (-15%) | 3.40 vs 3.99 (-15%) | 3.88 vs 3.92 (-1%) | 3.88 vs 3.92 (-1%) |
+| 5066, 812 | 7 | 3.43 vs 3.89 (-12%) | 3.13 vs 3.89 (-19%) | 4.03 vs 3.90 (+3%) | 4.03 vs 3.90 (+3%) |
+| 4262, 3751 | 8 | 3.54 vs 3.98 (-11%) | 3.54 vs 3.98 (-11%) | 3.88 vs 3.94 (-2%) | 3.88 vs 3.94 (-2%) |
+| 6864, 522 | 12 | 3.64 vs 4.01 (-9%) | 3.49 vs 4.01 (-13%) | 4.07 vs 3.99 (+2%) | 4.07 vs 3.99 (+2%) |
+| **4707, 3261** | **46** | 6.06 vs 3.94 (+54%) | 5.07 vs 3.94 (+29%) | 5.81 vs 3.91 (+49%) | **4.38 vs 3.91 (+12%)** |
+| **mean absolute error** | | **20.0%** | **17.3%** | **11.3%** | **4.0%** |
+
+Frame aggregate as the app computes it (all accepted fits, saturated included):
+
+| settings | bound | n | median FWHM | MAD | max |
+|---|---|---|---|---|---|
+| production | 2 | 1511 | 4.1014 | 0.2297 | 6.06 |
+| production | removed | 1511 | 4.1014 | 0.2297 | 5.51 |
+| `PSFResolution = 20` + Huber | 2 | 1510 | 4.0654 | 0.2103 | 5.81 |
+| `PSFResolution = 20` + Huber | removed | 1510 | 4.0654 | 0.2103 | 5.55 |
+
+- `PSFResolution = 20` + Huber on its own brings the four lightly clipped stars from 9-15% too small to within 3%
+  of their neighbours. The bound never binds on them there (fitted A 1.15-1.51).
+- Raising the bound then changes only the heavily clipped star: +49% -> +12%. Bound 10 and no bound are identical.
+- With the production fit, raising the bound is a wash: it roughly halves the heavy star's error but makes two
+  lightly clipped stars worse.
+- No frame median or MAD moves in any arm.
+
+This rests on one heavily clipped star, which is still 12% wide, and the least-squares ladder above shows uncapped
+error swinging with brightness. Rejecting saturated fits stays the recommendation until the equivalent ladder has
+been run through the robust fit.
 
 ### Why nothing catches it
 
@@ -201,9 +263,9 @@ both stars here:
 Clipping accounts for 1.29 of the 1.36 px excess (~95%). The wider aperture adds 0.025 px on its own, because the
 per-pixel noise gate already drops the far-wing pixels it would add.
 
-### Every saturated star is affected — reject the fit
+### Saturated stars: reject the fit
 
-Of 1737 accepted stars, 5 are saturated, and all five are biased — not just the obvious one:
+Of 1737 accepted stars, 5 are saturated. With production settings all five are biased, not just the obvious one:
 
 | x, y | box | saturated px in box | masked PSF samples | fitted A | FWHM px |
 |---|---|---|---|---|---|
@@ -215,6 +277,8 @@ Of 1737 accepted stars, 5 are saturated, and all five are biased — not just th
 
 The frame's accepted fits run p05 = 3.72, median = 4.10, p95 = 4.50. The four lightly-clipped stars sit at or below
 p05 and the heavily-clipped one is the frame maximum: the bias changes sign with how much of the core survives.
+With `PSFResolution = 20` + Huber the four lightly clipped stars come within 3% of their neighbours and only the
+heavily clipped one stays wrong (*Raising the bound with the recommended settings*).
 
 Use the flag the detector already computes — `star.Background + star.PeakBrightness >= p.SaturationThreshold`, the
 test behind `metrics.SaturatedBounds` and `StarsForHfrAggregation` — and skip `ModelPSF` for those stars, leaving
@@ -429,4 +493,5 @@ refits each probed star at other `PSFResolution` values, without the saturation 
 the detector's own measurement noise sigma; its `base` column reproduces the detector's `fwhmPx`, which is the
 check that the reconstructed measurement image is the one detection fitted. The census columns and the sweep are
 only produced for an unbinned mono frame. Settings arms were produced by varying one option in the harness settings
-file per run. See `.claude/docs/testapp-cli.md`.
+file per run. The amplitude-bound arms need a rebuilt solver, since the bound is a literal; see *Raising the bound
+with the recommended settings*. See `.claude/docs/testapp-cli.md`.
