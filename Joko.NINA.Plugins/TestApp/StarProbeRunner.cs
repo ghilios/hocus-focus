@@ -160,6 +160,15 @@ namespace TestApp {
             var bayered = DiagnosticUtil.IsBayeredFrameFileName(imagePath);
             var reconstructionFaithful = !bayered && p.DetectionBinning <= 1;
             if (p.HotpixelFiltering || (p.NoiseReductionRadius > 0 && p.StarMeasurementNoiseReductionEnabled)) {
+                if (!p.MeasurementHotpixelRepair) {
+                    // Legacy: the measurement image takes the same median the structure path does.
+                    if (p.HotpixelThresholdingEnabled) {
+                        HotpixelFiltering.HotpixelFilterWithThresholding(measurement, p.HotpixelThreshold);
+                    } else {
+                        HotpixelFiltering.HotpixelFilter(measurement);
+                    }
+                    Console.WriteLine("  MeasurementHotpixelRepair is OFF: reconstruction uses the legacy median");
+                } else {
                 // The MEASUREMENT path's filter, which is the isolation repair — NOT the median the structure
                 // path still takes (StarDetector.PrepareMeasurementAndStructureSources).
                 var reconstructionRepaired = HotpixelFiltering.RepairIsolatedHotpixels(measurement);
@@ -167,6 +176,7 @@ namespace TestApp {
                 // the detector's own MeasurementHotpixelCount, or the image being refit is not the one detection
                 // measured.
                 Console.WriteLine($"  reconstruction repaired {reconstructionRepaired} isolated hot pixel(s) (must equal measurementRepaired above)");
+                }
             }
             if (p.NoiseReductionRadius > 0 && p.StarMeasurementNoiseReductionEnabled) {
                 CvImageUtility.ConvolveGaussian(measurement, measurement, p.NoiseReductionRadius * 2 + 1);

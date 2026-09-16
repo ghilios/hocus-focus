@@ -465,7 +465,13 @@ namespace NINA.Joko.Plugins.HocusFocus.Interfaces {
 
         // If this is true, fits PSFs to minimize absolute deviation. This takes a bit more time computationally, but is more robust to noise
         // and outlier pixels
-        public bool UsePSFAbsoluteDeviation { get; set; } = true;
+        public bool UsePSFAbsoluteDeviation { get; set; } = false;
+
+        // Repair only ISOLATED hot pixels on the measurement image instead of running the structure path's 3x3
+        // median over it (StarDetector.PrepareMeasurementAndStructureSources). Defaults FALSE so a params bundle
+        // constructed directly behaves exactly as it did before this option existed; production sets it from
+        // StarDetectionOptions.MeasurementHotpixelRepair.
+        public bool MeasurementHotpixelRepair { get; set; } = false;
 
         // If PSF modeling is enabled, any R^2 values below this threshold will be rejected
         public double PSFGoodnessOfFitThreshold { get; set; } = 0.9;

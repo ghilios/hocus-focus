@@ -564,16 +564,21 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection {
                     Mat prebinnedStructureSource = null;
                     if (binning > 1) {
                         if (!hotpixelFilterAlreadyApplied && (p.HotpixelFiltering || (p.NoiseReductionRadius > 0 && p.StarMeasurementNoiseReductionEnabled))) {
-                            using (var nativeStructureSource = srcImage.Clone()) {
-                                metrics.HotpixelCount = ApplyHotpixelFilter(nativeStructureSource, p);
-                                // Tracked the moment it exists: the isolation repair and the measurement bin
-                                // below both allocate a full native-resolution frame, and an OOM out of either
-                                // would otherwise orphan this Mat — it belongs to neither tracker until then,
-                                // and it is not liveOwnedImage, so the finally could not free it.
-                                prebinnedStructureSource = scratch.T(CvImageUtility.BinMean(nativeStructureSource, binning));
+                            if (p.MeasurementHotpixelRepair) {
+                                using (var nativeStructureSource = srcImage.Clone()) {
+                                    metrics.HotpixelCount = ApplyHotpixelFilter(nativeStructureSource, p);
+                                    // Tracked the moment it exists: the isolation repair and the measurement bin
+                                    // below both allocate a full native-resolution frame, and an OOM out of either
+                                    // would otherwise orphan this Mat — it belongs to neither tracker until then,
+                                    // and it is not liveOwnedImage, so the finally could not free it.
+                                    prebinnedStructureSource = scratch.T(CvImageUtility.BinMean(nativeStructureSource, binning));
+                                }
+                                metrics.MeasurementHotpixelCount = HotpixelFiltering.RepairIsolatedHotpixels(srcImage);
+                                measurementDiffersFromStructure = true;
+                            } else {
+                                // Legacy: one filtered image feeds both paths, exactly as before this option.
+                                metrics.HotpixelCount = ApplyHotpixelFilter(srcImage, p);
                             }
-                            metrics.MeasurementHotpixelCount = HotpixelFiltering.RepairIsolatedHotpixels(srcImage);
-                            measurementDiffersFromStructure = true;
                             hotpixelFilterAlreadyApplied = true;
                         }
 
@@ -1056,15 +1061,40 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection {
             StarDetectorParams p,
             bool hotpixelFilterAlreadyApplied,
             ref bool measurementDiffersFromStructure) {
+            long? structureHotpixels = null;
+            long measurementHotpixels = 0L;
+            var hotpixelFilteringApplied = hotpixelFilterAlreadyApplied;
+            var noiseReductionApplied = false;
+
+            if (!p.MeasurementHotpixelRepair) {
+                // LEGACY PATH, bit-identical to the pipeline before this option existed: the median is applied in
+                // place to the measurement image and the structure source is a copy of the RESULT.
+                if (p.HotpixelFiltering || (p.NoiseReductionRadius > 0 && p.StarMeasurementNoiseReductionEnabled)) {
+                    if (!hotpixelFilterAlreadyApplied) {
+                        structureHotpixels = ApplyHotpixelFilter(measurementImage, p);
+                    }
+                    hotpixelFilteringApplied = true;
+                }
+                if (p.NoiseReductionRadius > 0 && p.StarMeasurementNoiseReductionEnabled) {
+                    CvImageUtility.ConvolveGaussian(measurementImage, measurementImage, p.NoiseReductionRadius * 2 + 1);
+                    noiseReductionApplied = true;
+                }
+                measurementImage.CopyTo(structureSource);
+                if (!hotpixelFilteringApplied && !noiseReductionApplied && p.NoiseReductionRadius > 0) {
+                    structureHotpixels = ApplyHotpixelFilter(structureSource, p);
+                }
+                if (p.NoiseReductionRadius > 0 && !noiseReductionApplied) {
+                    CvImageUtility.ConvolveGaussian(structureSource, structureSource, p.NoiseReductionRadius * 2 + 1);
+                    measurementDiffersFromStructure = true;
+                }
+                return new HotpixelRepairCounts(structureHotpixels, measurementHotpixels);
+            }
+
             // The structure source starts from the RAW pixels, before the measurement image is repaired, so its
             // median filter sees exactly the input it saw before the split existed.
             measurementImage.CopyTo(structureSource);
 
-            long? structureHotpixels = null;
-            long measurementHotpixels = 0L;
-
             // Hotpixel filtering also runs when noise reduction will be applied to the measurement image.
-            var hotpixelFilteringApplied = hotpixelFilterAlreadyApplied;
             if (p.HotpixelFiltering || (p.NoiseReductionRadius > 0 && p.StarMeasurementNoiseReductionEnabled)) {
                 if (!hotpixelFilterAlreadyApplied) {
                     structureHotpixels = ApplyHotpixelFilter(structureSource, p);
@@ -1074,7 +1104,6 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection {
                 hotpixelFilteringApplied = true;
             }
 
-            var noiseReductionApplied = false;
             if (p.NoiseReductionRadius > 0 && p.StarMeasurementNoiseReductionEnabled) {
                 CvImageUtility.ConvolveGaussian(measurementImage, measurementImage, p.NoiseReductionRadius * 2 + 1);
                 noiseReductionApplied = true;

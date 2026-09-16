@@ -115,7 +115,7 @@ public class StarDetectorParamsTests {
             Assert.That(p.SaturationThreshold, Is.EqualTo(0.99).Within(1e-6));
             Assert.That(p.ModelPSF, Is.True);
             Assert.That(p.PSFFitType, Is.EqualTo(StarDetectorPSFFitType.Moffat_40));
-            Assert.That(p.UsePSFAbsoluteDeviation, Is.True);
+            Assert.That(p.UsePSFAbsoluteDeviation, Is.False);
             Assert.That(p.PSFGoodnessOfFitThreshold, Is.EqualTo(0.9));
             Assert.That(p.PSFResolution, Is.EqualTo(20));
             Assert.That(p.PSFParallelPartitionSize, Is.EqualTo(100));

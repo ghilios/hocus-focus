@@ -28,8 +28,24 @@ For the headless TestApp diagnostic that exercises this test, see `testapp-cli.m
 
 ## Measurement image vs structure source (two hotpixel filters)
 
-`BuildDetectionContextInternal` derives TWO images from the same raw pixels and filters each differently
-(`StarDetector.PrepareMeasurementAndStructureSources`):
+**Gated by `StarDetectorParams.MeasurementHotpixelRepair` / `StarDetectionOptions.MeasurementHotpixelRepair`,
+which is OFF unless a configuration was deliberately re-derived.** With it off the pipeline takes a legacy
+branch that is BIT-IDENTICAL to the pipeline before the option existed (pinned by
+`StarDetectorEquivalenceTests`, whose golden signature is once again develop's). The option turns itself on in
+exactly two places, both of which re-derive the acceptance gates in the same breath: `ResetDefaults` and
+`ApplyOptimizedSettings`. A profile load reads FALSE, and a settings file with no such field deserializes to
+FALSE, so neither can switch it on. Two tests assert the deliberate reset-vs-construction difference rather
+than skipping it (`DeliberatelyDiffersFromFreshConstruction`, and the second named exception in
+`BuildDefaultStarDetectorParams_MatchesConstructedOptionsBuild`).
+
+**Why it is gated at all:** it changes what two shipped gates MEAN. The measurement image's K-sigma becomes the
+frame's honest noise (the median was suppressing it), so `Sensitivity` is a stricter bar; and every star
+measures a smaller HFR, so `MinHFR` is a stricter floor. Which one bites depends on the rig — the investigated
+frame lost 17% of its stars to Sensitivity, a synthetic frame lost 24% to MinHFR, and the real bank at defaults
+was a wash. See `docs/saturated-star-fwhm-fixes-results.md`.
+
+When ON, `BuildDetectionContextInternal` derives TWO images from the same raw pixels and filters each
+differently (`StarDetector.PrepareMeasurementAndStructureSources`):
 
 | | image | hotpixel filter | who reads it |
 |---|---|---|---|

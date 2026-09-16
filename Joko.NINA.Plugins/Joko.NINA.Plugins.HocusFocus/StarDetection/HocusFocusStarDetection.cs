@@ -397,6 +397,7 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection {
                 HotpixelThreshold = options.HotpixelThreshold,
                 SaturationThreshold = options.SaturationThreshold,
                 ExcludeSaturatedStarsFromHFR = options.ExcludeSaturatedStarsFromHFR,
+                MeasurementHotpixelRepair = options.MeasurementHotpixelRepair,
                 PSFPixelIntegration = options.PSFPixelIntegration,
                 // Internal parallelism knob — 0 = auto (Environment.ProcessorCount via ParallelExecution governor).
                 // Not exposed in the options UI; callers may override after BuildStarDetectorParams returns.
@@ -462,10 +463,13 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection {
                 PSFParallelPartitionSize = 100,
                 PSFResolution = 20,
                 PSFGoodnessOfFitThreshold = 0.9,
-                UsePSFAbsoluteDeviation = true,
+                UsePSFAbsoluteDeviation = false,
                 HotpixelThreshold = 0.001d,
                 SaturationThreshold = 0.99d,
                 ExcludeSaturatedStarsFromHFR = true,
+                // The optimizer's seed is the RESET state, which has the measurement-path repair on. So a landing
+                // it produces is calibrated against that behaviour, which is why applying one enables the option.
+                MeasurementHotpixelRepair = true,
                 PSFPixelIntegration = false,
                 MaxStarEvaluationParallelism = 0,
                 // Matches StarDetectionOptions.ResetDefaults (Median); kept in lockstep by

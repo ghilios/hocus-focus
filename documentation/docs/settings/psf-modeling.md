@@ -21,7 +21,7 @@ Star detection first finds candidates, measures each star's centroid and **HFR**
 | PSF Resolution | 20 | integer > 0 (pixels) | Sampling-grid width across the star box; accuracy vs. speed |
 | PSF Fit Threshold | 0.9 | (0, 1] (R²) | Minimum R² for a fit to be accepted |
 | PSF Pixel Integration | Off | On / Off | Integrate the model over each pixel instead of point-sampling |
-| PSF MAD Fitting | On | On / Off | Absolute-deviation fit, more robust to noise and outlier pixels |
+| PSF MAD Fitting | Off | On / Off | Absolute-deviation fit, more robust to noise and outlier pixels, and expensive |
 | PSF Parallel Size | 100 | integer ≥ 0 (stars) | Batch size for parallel fitting; 0 disables parallelism |
 
 ![Gaussian versus Moffat PSF images with radial profiles, showing the heavier wings of the Moffat model](../assets/figures/psf-models.png){ width=620 }
@@ -113,14 +113,14 @@ Point-sampling the model at \( (i, j) \) ignores how the profile varies across a
 
 **PSF MAD Fitting** (property `UsePSFAbsoluteDeviation`) minimizes absolute deviation instead of squared residuals.
 
-> Fits the PSF by minimizing absolute deviation rather than squared residuals, which is more robust to noise and outlier pixels and more closely mimics PixInsight PSF fitting logic. On by default: paired with a PSF Resolution of 20 it measurably tightens the spread of FWHM across the frame at a modest extra cost
+> Fits the PSF by minimizing absolute deviation rather than squared residuals, which is more robust to noise and outlier pixels and more closely mimics PixInsight PSF fitting logic. Off by default because it is expensive: measured across the auto-focus bank it costs roughly 5.6x the PSF fitting time and tightens the FWHM spread by only about 1%, where PSF Resolution 20 costs 1.8x for about 6%
 
-**Default:** On &nbsp;•&nbsp; **Range:** On / Off
+**Default:** Off &nbsp;•&nbsp; **Range:** On / Off
 
 Fitting to minimize absolute deviation downweights outlier pixels (a hot pixel, a cosmic-ray hit, a nearby star's flux) relative to a least-squares fit, at a modest extra computational cost. It is also closer to how PixInsight fits a PSF.
 
 !!! tip "When this helps"
-    Leave it **on** unless fitting time matters to you. It is the expensive half of the PSF defaults: measured across the auto-focus bank it costs about 5.6x the fitting time on its own, and on top of PSF Resolution 20 it takes the FWHM spread from about 6% tighter to about 8%. Turn it **off**, keeping PSF Resolution at 20, if you would rather have most of the improvement for a fraction of the time.
+    Leave it **off** unless you have a specific reason. Measured across the auto-focus bank it costs about 5.6x the PSF fitting time on its own, and on top of PSF Resolution 20 it moves the FWHM spread only from about 6% tighter to about 8%. PSF Resolution 20 is where the value is, at 1.8x. Turn this **on** for noisy frames or fields with frequent outlier pixels where ordinary fits are being pulled around, and when you want behavior closer to PixInsight's, if you can spare the time.
 
 ## PSF Parallel Size
 

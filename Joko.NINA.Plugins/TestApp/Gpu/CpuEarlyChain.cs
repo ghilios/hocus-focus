@@ -49,38 +49,63 @@ namespace TestApp.Gpu {
 
             // Steps 1-3: the measurement/structure split (StarDetector.PrepareMeasurementAndStructureSources).
             var noiseReduced = new Mat();
-            if (structureSource != null) {
-                structureSource.CopyTo(noiseReduced);
-                measurementDiffers = true;
-            } else {
-                meas.CopyTo(noiseReduced);
+            bool noiseReductionApplied = false;
+            if (!p.MeasurementHotpixelRepair && structureSource == null) {
+                // LEGACY PATH, mirroring the detector's legacy branch.
                 if (p.HotpixelFiltering || (p.NoiseReductionRadius > 0 && p.StarMeasurementNoiseReductionEnabled)) {
                     if (!hotpixelAlreadyApplied) {
-                        hotpixelCount = ApplyHotpixelFilter(noiseReduced, p);
-                        measurementHotpixelCount = HotpixelFiltering.RepairIsolatedHotpixels(meas);
+                        hotpixelCount = ApplyHotpixelFilter(meas, p);
                         measurementMutated = true;
-                        measurementDiffers = true;
                     }
                     hotpixelFilteringApplied = true;
                 }
-            }
-
-            bool noiseReductionApplied = false;
-            if (p.NoiseReductionRadius > 0 && p.StarMeasurementNoiseReductionEnabled) {
-                CvImageUtility.ConvolveGaussian(meas, meas, p.NoiseReductionRadius * 2 + 1);
-                noiseReductionApplied = true;
-                measurementMutated = true;
-            }
-            Record("SrcImagePreparation");
-
-            if (structureSource == null && !hotpixelFilteringApplied && p.NoiseReductionRadius > 0) {
-                hotpixelCount = ApplyHotpixelFilter(noiseReduced, p);
-                measurementDiffers = true;
-            }
-            if (p.NoiseReductionRadius > 0) {
-                CvImageUtility.ConvolveGaussian(noiseReduced, noiseReduced, p.NoiseReductionRadius * 2 + 1);
-                if (!noiseReductionApplied) {
+                if (p.NoiseReductionRadius > 0 && p.StarMeasurementNoiseReductionEnabled) {
+                    CvImageUtility.ConvolveGaussian(meas, meas, p.NoiseReductionRadius * 2 + 1);
+                    noiseReductionApplied = true;
+                    measurementMutated = true;
+                }
+                Record("SrcImagePreparation");
+                meas.CopyTo(noiseReduced);
+                if (!hotpixelFilteringApplied && !noiseReductionApplied && p.NoiseReductionRadius > 0) {
+                    hotpixelCount = ApplyHotpixelFilter(noiseReduced, p);
+                }
+                if (p.NoiseReductionRadius > 0 && !noiseReductionApplied) {
+                    CvImageUtility.ConvolveGaussian(noiseReduced, noiseReduced, p.NoiseReductionRadius * 2 + 1);
                     measurementDiffers = true;
+                }
+            } else {
+                if (structureSource != null) {
+                    structureSource.CopyTo(noiseReduced);
+                    measurementDiffers = true;
+                } else {
+                    meas.CopyTo(noiseReduced);
+                    if (p.HotpixelFiltering || (p.NoiseReductionRadius > 0 && p.StarMeasurementNoiseReductionEnabled)) {
+                        if (!hotpixelAlreadyApplied) {
+                            hotpixelCount = ApplyHotpixelFilter(noiseReduced, p);
+                            measurementHotpixelCount = HotpixelFiltering.RepairIsolatedHotpixels(meas);
+                            measurementMutated = true;
+                            measurementDiffers = true;
+                        }
+                        hotpixelFilteringApplied = true;
+                    }
+                }
+
+                if (p.NoiseReductionRadius > 0 && p.StarMeasurementNoiseReductionEnabled) {
+                    CvImageUtility.ConvolveGaussian(meas, meas, p.NoiseReductionRadius * 2 + 1);
+                    noiseReductionApplied = true;
+                    measurementMutated = true;
+                }
+                Record("SrcImagePreparation");
+
+                if (structureSource == null && !hotpixelFilteringApplied && p.NoiseReductionRadius > 0) {
+                    hotpixelCount = ApplyHotpixelFilter(noiseReduced, p);
+                    measurementDiffers = true;
+                }
+                if (p.NoiseReductionRadius > 0) {
+                    CvImageUtility.ConvolveGaussian(noiseReduced, noiseReduced, p.NoiseReductionRadius * 2 + 1);
+                    if (!noiseReductionApplied) {
+                        measurementDiffers = true;
+                    }
                 }
             }
             var structure = new Mat();

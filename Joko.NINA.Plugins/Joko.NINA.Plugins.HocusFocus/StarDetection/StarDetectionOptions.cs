@@ -306,10 +306,14 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection {
             psfParallelPartitionSize = optionsAccessor.GetValueInt32("PSFParallelPartitionSize", 100);
             psfResolution = optionsAccessor.GetValueInt32("PSFResolution", 20);
             psfFitThreshold = optionsAccessor.GetValueDouble("PSFFitThreshold", 0.9);
-            usePSFAbsoluteDeviation = optionsAccessor.GetValueBoolean(nameof(UsePSFAbsoluteDeviation), true);
+            usePSFAbsoluteDeviation = optionsAccessor.GetValueBoolean(nameof(UsePSFAbsoluteDeviation), false);
             hotpixelThreshold = optionsAccessor.GetValueDouble(nameof(HotpixelThreshold), 0.001d);
             saturationThreshold = optionsAccessor.GetValueDouble(nameof(SaturationThreshold), 0.99d);
             excludeSaturatedStarsFromHFR = optionsAccessor.GetValueBoolean(nameof(ExcludeSaturatedStarsFromHFR), true);
+            // FALSE on read, by design. It changes what Brightness Sensitivity and Min HFR mean, so it must never
+            // switch itself on under a configuration that was tuned without it. ResetDefaults and
+            // ApplyOptimizedSettings turn it on, because both re-derive those gates in the same breath.
+            measurementHotpixelRepair = optionsAccessor.GetValueBoolean(nameof(MeasurementHotpixelRepair), false);
             measurementAverage = optionsAccessor.GetValueEnum<MeasurementAverageEnum>(nameof(MeasurementAverage), MeasurementAverageEnum.Median);
             psfPixelIntegration = optionsAccessor.GetValueBoolean(nameof(PSFPixelIntegration), false);
             useOptimizedSettings = optionsAccessor.GetValueBoolean(nameof(UseOptimizedSettings), false);
@@ -385,12 +389,18 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection {
             PSFParallelPartitionSize = 100;
             PSFResolution = 20;
             PSFFitThreshold = 0.9;
-            UsePSFAbsoluteDeviation = true;
+            // Deliberately OFF. It is the expensive half of the PSF pair: measured across the AF bank it costs
+            // ~5.6x the fitting time on its own and takes only ~1% off the FWHM spread, where PSFResolution 20
+            // costs 1.8x for ~6%. See docs/saturated-star-fwhm-fixes-results.md Part 2.
+            UsePSFAbsoluteDeviation = false;
             HotpixelThreshold = 0.001d;
             SaturationThreshold = 0.99d;
             ExcludeSaturatedStarsFromHFR = true;
             MeasurementAverage = MeasurementAverageEnum.Median;
             PSFPixelIntegration = false;
+            // ON from here: a restore re-derives every gate, so the stricter Brightness Sensitivity / Min HFR
+            // meaning arrives together with the values that were calibrated against it.
+            MeasurementHotpixelRepair = true;
             optimizedSettings = null;
             optionsAccessor.SetValueString(OptimizedSettingsJsonKey, "");
             RaisePropertyChanged(nameof(HasOptimizedSettings));
@@ -1202,6 +1212,24 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection {
             }
         }
 
+        private bool measurementHotpixelRepair;
+
+        /// <summary>
+        /// Repair only ISOLATED hot pixels on the measurement image rather than running the structure path's 3x3
+        /// median over it. See <see cref="IStarDetectionOptions.MeasurementHotpixelRepair"/> for why this is off
+        /// for existing configurations.
+        /// </summary>
+        public bool MeasurementHotpixelRepair {
+            get => measurementHotpixelRepair;
+            set {
+                if (measurementHotpixelRepair != value) {
+                    measurementHotpixelRepair = value;
+                    optionsAccessor.SetValueBoolean(nameof(MeasurementHotpixelRepair), measurementHotpixelRepair);
+                    RaisePropertyChanged();
+                }
+            }
+        }
+
         private bool usePSFAbsoluteDeviation;
 
         public bool UsePSFAbsoluteDeviation {
@@ -1317,6 +1345,11 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection {
             optimizedSettings = settings.Clone();
             optionsAccessor.SetValueString(OptimizedSettingsJsonKey, JsonConvert.SerializeObject(settings));
             RaisePropertyChanged(nameof(HasOptimizedSettings));
+            // An optimization landed these gate values against the CURRENT detector, so adopt the measurement-path
+            // repair with them. ApplySnapshotCoreImpl copies every knob verbatim AFTER calling this, so restoring a
+            // captured snapshot (AF replay, a settings import) still reproduces whatever THAT snapshot recorded --
+            // including the false a file predating this option deserializes to.
+            MeasurementHotpixelRepair = true;
             UseAdvanced = false;
             UseOptimizedSettings = true; // fires ConfigureSimpleSettings via PropertyChanged
             ConfigureSimpleSettings(); // ensure applied even if UseOptimizedSettings was already true
@@ -1441,6 +1474,7 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection {
             HotpixelThreshold = source.HotpixelThreshold;
             SaturationThreshold = source.SaturationThreshold;
             ExcludeSaturatedStarsFromHFR = source.ExcludeSaturatedStarsFromHFR;
+            MeasurementHotpixelRepair = source.MeasurementHotpixelRepair;
             MeasurementAverage = source.MeasurementAverage;
             PSFPixelIntegration = source.PSFPixelIntegration;
         }

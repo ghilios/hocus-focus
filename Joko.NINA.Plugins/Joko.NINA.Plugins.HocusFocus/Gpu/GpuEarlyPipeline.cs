@@ -86,6 +86,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Gpu {
                     HotpixelThreshold = p.HotpixelThreshold,
                     NoiseReductionRadius = p.NoiseReductionRadius,
                     StarMeasurementNoiseReductionEnabled = p.StarMeasurementNoiseReductionEnabled,
+                    MeasurementHotpixelRepair = p.MeasurementHotpixelRepair,
                     NoiseClippingMultiplier = p.NoiseClippingMultiplier,
                     EffectiveStructureLayers = effectiveStructureLayers,
                     StructureLayers = p.StructureLayers,

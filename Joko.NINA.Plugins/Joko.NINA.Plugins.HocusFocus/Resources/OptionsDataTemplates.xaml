@@ -532,7 +532,10 @@
     <TextBlock x:Key="SimpleFocusRange_Tooltip" Text="As you get further from critical focus, stars become large donuts. Star detection will typically consider them too large to be stars when you're far enough from focus. Enabling a wide range increases the number of layers considered for star detection" />
     <TextBlock x:Key="SimplePixelScale_Tooltip" Text="At high focal lengths, pixel scale decreases and apparent star size (in pixels) increases. Setting this to a higher focal length increases the number of layers considered for star detection, which could increase false positives due from nebulosity" />
     <TextBlock x:Key="DetectionBinning_Tooltip" Text="Software binning applied to the frame for star detection only. Star detection is calibrated for in-focus stars of roughly 2 to 4 pixels; at long focal lengths stars are much larger than that, which puts the pixel-based settings out of range. Binning the frame for detection brings star size back into range and improves signal to noise per pixel. The image you see and the HFR values reported stay at the resolution the camera captured. This is not NINA's Auto Focus Binning, which changes how the camera captures the auto-focus frames and should match the binning you image at; the two multiply" />
-    <TextBlock x:Key="UsePSFAbsoluteDeviation_Tooltip" Text="Fits the PSF by minimizing absolute deviation rather than squared residuals, which is more robust to noise and outlier pixels and more closely mimics PixInsight PSF fitting logic. On by default: paired with a PSF Resolution of 20 it measurably tightens the spread of FWHM across the frame at a modest extra cost" />
+    <TextBlock
+        x:Key="MeasurementHotpixelRepair_Tooltip"
+        Text="Repairs only ISOLATED hot pixels on the image HFR and the PSF are measured from, instead of running a 3x3 median over all of it. A median softens every star it touches: it drops a bright star's peak about a fifth and biases the fitted FWHM about 6% high. The targeted repair leaves star cores alone. Because that image is no longer smoothed, its noise estimate is the frame's honest noise, so Brightness Sensitivity and Min HFR become effectively stricter at the same numbers and a rig tuned without this may detect fewer faint stars. For that reason it stays OFF for existing settings; Restore Defaults and applying an optimization turn it on, because both re-derive those gates at the same time. Structure detection is unaffected either way." />
+    <TextBlock x:Key="UsePSFAbsoluteDeviation_Tooltip" Text="Fits the PSF by minimizing absolute deviation rather than squared residuals, which is more robust to noise and outlier pixels and more closely mimics PixInsight PSF fitting logic. Off by default because it is expensive: measured across the auto-focus bank it costs roughly 5.6x the PSF fitting time and tightens the FWHM spread by only about 1%, where PSF Resolution 20 costs 1.8x for about 6%" />
     <TextBlock x:Key="RotatedHyperbolicFit_Tooltip" Text="Allows hyperbolic fitting to rotate. This can be useful if your focus curve is asymmetrical." />
     <TextBlock x:Key="MeasurementAverage_Tooltip" Text="Controls how the average star measurement across the frame is calculated. Median is robust to outliers, and is the default." />
     <TextBlock x:Key="MaxAutoFocusOutlierRejections_Tooltip" Text="Controls the maximum number of points that can be rejected as outliers during Auto Focus curve fitting." />
@@ -1202,6 +1205,8 @@
                 <!--  54: Detection Binning (always visible - it applies in both Simple and Advanced mode). Its
                       recommendation lives OUTSIDE this grid, just below it — see the note there.  -->
                 <RowDefinition />
+                <!--  55: Measurement Hotpixel Repair  -->
+                <RowDefinition Style="{StaticResource ShowOnUseAdvanced}" />
             </Grid.RowDefinitions>
             <TextBlock
                 Grid.Row="0"
@@ -1929,6 +1934,22 @@
                     </DataTemplate>
                 </ComboBox.ItemTemplate>
             </ComboBox>
+
+            <TextBlock
+                Grid.Row="55"
+                Grid.Column="0"
+                VerticalAlignment="Center"
+                Text="Measurement Hotpixel Repair"
+                ToolTip="{StaticResource MeasurementHotpixelRepair_Tooltip}" />
+            <CheckBox
+                Grid.Row="55"
+                Grid.Column="1"
+                MinWidth="80"
+                Margin="5,5,0,0"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Center"
+                IsChecked="{Binding StarDetectionOptions.MeasurementHotpixelRepair}"
+                ToolTip="{StaticResource MeasurementHotpixelRepair_Tooltip}" />
 
             <TextBlock
                 Grid.Row="19"

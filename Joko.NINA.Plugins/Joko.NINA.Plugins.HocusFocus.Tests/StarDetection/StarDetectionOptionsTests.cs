@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Reflection;
+using NINA.Joko.Plugins.HocusFocus.AutoFocus.Replay;
 using NINA.Joko.Plugins.HocusFocus.Interfaces;
 using NINA.Joko.Plugins.HocusFocus.StarDetection;
 using NINA.Joko.Plugins.HocusFocus.StarDetection.Optimization;
@@ -20,6 +21,65 @@ public class StarDetectionOptionsTests {
         var store = new InMemoryPluginOptionsAccessor();
         var options = new StarDetectionOptions(profile, store);
         return (options, store, profile);
+    }
+
+    // ── MeasurementHotpixelRepair: the gating contract ──────────────────────────────────────────────
+    // It changes what Brightness Sensitivity and Min HFR mean, so it may only arrive with a deliberate
+    // re-derivation of those gates. These four tests are that contract.
+
+    [Test]
+    public void MeasurementHotpixelRepair_IsOffForAnExistingConfiguration() {
+        // A blank accessor is what a profile that predates the option looks like on load.
+        var (options, _, _) = Build();
+        Assert.That(options.MeasurementHotpixelRepair, Is.False);
+    }
+
+    [Test]
+    public void MeasurementHotpixelRepair_IsOnAfterResetDefaults() {
+        var (options, store, _) = Build();
+        options.ResetDefaults();
+        Assert.Multiple(() => {
+            Assert.That(options.MeasurementHotpixelRepair, Is.True);
+            Assert.That(store.Snapshot[nameof(StarDetectionOptions.MeasurementHotpixelRepair)], Is.True);
+        });
+    }
+
+    [Test]
+    public void MeasurementHotpixelRepair_IsOnAfterApplyingAnOptimization() {
+        var (options, _, _) = Build();
+        Assert.That(options.MeasurementHotpixelRepair, Is.False, "precondition");
+
+        options.ApplyOptimizedSettings(new OptimizedStarDetectionSettings {
+            BrightnessSensitivity = 11.0, StarClippingMultiplier = 2.0, NoiseClippingMultiplier = 4.0,
+            StarPeakResponse = 0.75, MaxDistortion = 0.5, MinHFR = 1.2, StarCenterTolerance = 0.3,
+            StructureLayers = 4, NoiseReductionRadius = 3, MinStarBoundingBoxSize = 5,
+            HotpixelThresholdingEnabled = true, HotpixelThreshold = 0.001
+        });
+
+        Assert.That(options.MeasurementHotpixelRepair, Is.True,
+            "an optimization lands its gate values against the current detector, so it adopts the repair too");
+    }
+
+    [Test]
+    public void MeasurementHotpixelRepair_StaysOffWhenImportingASnapshotThatPredatesIt() {
+        // A settings file written before the option existed deserializes to a snapshot whose property is false.
+        // Importing it must not turn the behaviour on, even though the snapshot carries optimized settings and
+        // ApplyOptimizedSettings would otherwise enable it.
+        var (options, _, _) = Build();
+        options.ResetDefaults();
+        Assert.That(options.MeasurementHotpixelRepair, Is.True, "precondition");
+
+        // A legacy file carries every OTHER field; only this one is absent, which deserializes to false.
+        var (donor, _, _) = Build();
+        donor.ResetDefaults();
+        var legacy = StarDetectionSettingsSnapshot.FromOptions(donor);
+        legacy.MeasurementHotpixelRepair = false;
+        Assert.That(legacy.MinHFR, Is.GreaterThan(0), "the legacy snapshot must be otherwise well-formed");
+
+        options.ApplyImportedSnapshot(legacy);
+
+        Assert.That(options.MeasurementHotpixelRepair, Is.False,
+            "a file with no such property must never enable it");
     }
 
     [Test]
@@ -77,7 +137,7 @@ public class StarDetectionOptionsTests {
         options.PSFParallelPartitionSize = 200;
         options.PSFResolution = 12;
         options.PSFFitThreshold = 0.85;
-        options.UsePSFAbsoluteDeviation = false;
+        options.UsePSFAbsoluteDeviation = true;
         options.HotpixelThreshold = 0.01;
         options.SaturationThreshold = 0.95;
         options.MeasurementAverage = MeasurementAverageEnum.MeanOutliers;
@@ -112,7 +172,7 @@ public class StarDetectionOptionsTests {
             Assert.That(store.Snapshot["PSFParallelPartitionSize"], Is.EqualTo(200));
             Assert.That(store.Snapshot["PSFResolution"], Is.EqualTo(12));
             Assert.That(store.Snapshot["PSFFitThreshold"], Is.EqualTo(0.85));
-            Assert.That(store.Snapshot[nameof(StarDetectionOptions.UsePSFAbsoluteDeviation)], Is.False);
+            Assert.That(store.Snapshot[nameof(StarDetectionOptions.UsePSFAbsoluteDeviation)], Is.True);
             Assert.That(store.Snapshot[nameof(StarDetectionOptions.HotpixelThreshold)], Is.EqualTo(0.01));
             Assert.That(store.Snapshot[nameof(StarDetectionOptions.SaturationThreshold)], Is.EqualTo(0.95));
             Assert.That(store.Snapshot[nameof(StarDetectionOptions.MeasurementAverage)], Is.EqualTo(MeasurementAverageEnum.MeanOutliers));
@@ -394,6 +454,15 @@ public class StarDetectionOptionsTests {
             Assert.That(fromDefault.PSFFitType, Is.EqualTo(fromOptions.PSFFitType));
             Assert.That(fromDefault.HotpixelFiltering, Is.EqualTo(fromOptions.HotpixelFiltering));
             Assert.That(fromDefault.HotpixelThresholdingEnabled, Is.EqualTo(fromOptions.HotpixelThresholdingEnabled));
+            // ---- The SECOND named exception, asserted in both directions like the F70 one below.
+            // BuildDefaultStarDetectorParams is the optimizer's seed, which is the RESET state, so it carries
+            // MeasurementHotpixelRepair ON; a constructed options object is a profile LOAD, which carries it OFF
+            // so settings tuned without it keep their gate meanings. See
+            // AssertStateEqualsFreshConstruction.DeliberatelyDiffersFromFreshConstruction.
+            Assert.That(fromDefault.MeasurementHotpixelRepair, Is.True,
+                "the optimizer seed is the reset state, which has the measurement-path repair on");
+            Assert.That(fromOptions.MeasurementHotpixelRepair, Is.False,
+                "a constructed options object is a profile load, which must leave the repair off");
             // ---- F70: the ONE named exception, asserted in BOTH directions so either side moving fails loudly.
             // BuildDefaultStarDetectorParams carries the Typical preset's PRE-compensation base (3); every
             // constructed options object carries the +1 DerivePresetSettings adds when hotpixel thresholding and
@@ -450,11 +519,27 @@ public class StarDetectionOptionsTests {
         nameof(StarDetectionOptions.DetectionBinningRecommendationVisible),
     };
 
+    // The ONE property that must DIFFER between a fresh construction and a ResetDefaults, and the reason it is
+    // asserted below rather than merely skipped. MeasurementHotpixelRepair changes what Brightness Sensitivity and
+    // Min HFR mean, so it must not switch itself on under settings that were tuned without it: a construction (a
+    // real profile load) reads FALSE, and only a deliberate re-derivation — Restore Defaults, or applying an
+    // optimization — turns it on. Excluding it silently would let either side drift unnoticed.
+    private static readonly HashSet<string> DeliberatelyDiffersFromFreshConstruction = new() {
+        nameof(StarDetectionOptions.MeasurementHotpixelRepair),
+    };
+
     private static void AssertStateEqualsFreshConstruction(StarDetectionOptions actual, string entryState) {
         var (expected, _, _) = Build();
+        Assert.Multiple(() => {
+            Assert.That(expected.MeasurementHotpixelRepair, Is.False,
+                "a fresh construction (what a profile load produces) must leave MeasurementHotpixelRepair off");
+            Assert.That(actual.MeasurementHotpixelRepair, Is.True,
+                $"ResetDefaults from '{entryState}' must turn MeasurementHotpixelRepair on");
+        });
         var mismatches = new List<string>();
         foreach (var prop in typeof(StarDetectionOptions).GetProperties(BindingFlags.Public | BindingFlags.Instance)) {
-            if (!prop.CanRead || prop.GetIndexParameters().Length > 0 || NotPartOfDefaultState.Contains(prop.Name)) {
+            if (!prop.CanRead || prop.GetIndexParameters().Length > 0 || NotPartOfDefaultState.Contains(prop.Name)
+                || DeliberatelyDiffersFromFreshConstruction.Contains(prop.Name)) {
                 continue;
             }
             var a = prop.GetValue(actual);
@@ -828,7 +913,7 @@ public class StarDetectionOptionsTests {
     [TestCase(nameof(StarDetectionOptions.UseAutoFocusCrop), false)]
     [TestCase(nameof(StarDetectionOptions.HotpixelFiltering), false)]
     [TestCase(nameof(StarDetectionOptions.HotpixelThresholdingEnabled), false)]
-    [TestCase(nameof(StarDetectionOptions.UsePSFAbsoluteDeviation), false)]
+    [TestCase(nameof(StarDetectionOptions.UsePSFAbsoluteDeviation), true)]
     [TestCase(nameof(StarDetectionOptions.DefocusAwareGates), true)]
     [TestCase(nameof(StarDetectionOptions.DefocusDistortionSizeReference), 25.0)]
     [TestCase(nameof(StarDetectionOptions.DefocusDistortionMinFactor), 0.3)]

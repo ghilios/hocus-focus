@@ -155,6 +155,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Tests.StarDetection {
 
             // Radius 0 isolates the hotpixel filter: neither image gets a noise-reduction Gaussian.
             var p = new StarDetectorParams {
+                MeasurementHotpixelRepair = true,
                 HotpixelFiltering = true,
                 HotpixelThresholdingEnabled = false,
                 StarMeasurementNoiseReductionEnabled = false,

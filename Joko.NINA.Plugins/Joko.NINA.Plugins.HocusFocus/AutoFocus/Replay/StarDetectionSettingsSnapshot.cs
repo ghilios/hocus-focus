@@ -87,6 +87,12 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus.Replay {
         public double HotpixelThreshold { get; set; }
         public double SaturationThreshold { get; set; }
         public bool ExcludeSaturatedStarsFromHFR { get; set; } = true;
+
+        /// <summary>
+        /// Defaults FALSE on purpose: a settings file written before this option existed has no such field, and
+        /// deserializing it must NOT turn the behaviour on. Only Restore Defaults and applying an optimization do.
+        /// </summary>
+        public bool MeasurementHotpixelRepair { get; set; } = false;
         public MeasurementAverageEnum MeasurementAverage { get; set; }
         public bool PSFPixelIntegration { get; set; }
 
@@ -177,6 +183,7 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus.Replay {
                 HotpixelThreshold = o.HotpixelThreshold,
                 SaturationThreshold = o.SaturationThreshold,
                 ExcludeSaturatedStarsFromHFR = o.ExcludeSaturatedStarsFromHFR,
+                MeasurementHotpixelRepair = o.MeasurementHotpixelRepair,
                 MeasurementAverage = o.MeasurementAverage,
                 PSFPixelIntegration = o.PSFPixelIntegration,
                 UseOptimizedSettings = o.UseOptimizedSettings

@@ -55,7 +55,7 @@ A candidate is accepted only when its brightness above background divided by the
 
 **Smaller values are more sensitive** (they admit fainter stars); larger values are stricter. Because \(n\) is measured on the image actually sampled for star measurement, the same threshold keeps its meaning whether or not noise reduction is enabled.
 
-That image is no longer median-smoothed for hot pixels (see [Hot Pixels & Saturation](hotpixel-saturation.md#two-images-two-filters)), so \(n\) is now the frame's honest noise rather than a suppressed one. A setting carried over from an earlier version, or landed by an earlier optimization run, is therefore a stricter bar than it used to be, and rejects more of the faintest stars. On one measured frame the count fell 17%, entirely from the faint tail whose fitted widths scattered 64% more than the stars that survived. Lower this setting or re-run the wizard if you want them back.
+With [Measurement Hotpixel Repair](hotpixel-saturation.md#measurement-hotpixel-repair) on, that image is no longer median-smoothed, so \(n\) becomes the frame's honest noise rather than a suppressed one and this threshold is a stricter bar at the same number. On one measured frame the count fell 17%, entirely from the faint tail whose fitted widths scattered 64% more than the stars that survived. That is why the repair stays off for settings tuned without it, and why turning it on is worth pairing with a fresh optimization run.
 
 **Default:** 10.0. **Range:** ≥ 0 (must be non-negative)
 

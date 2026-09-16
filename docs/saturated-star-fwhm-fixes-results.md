@@ -3,14 +3,24 @@
 What changed, and what it measurably does. The design and the evidence behind it are in
 `docs/saturated-star-fwhm-investigation-results.md`; this records the implementation's measured effect.
 
+> **What actually ships, after review.** `UsePSFAbsoluteDeviation` stays **off**: the decomposition below
+> showed it costs 5.6x the PSF fitting time for about a fifth of the benefit. `PSFResolution = 20` is the new
+> default with **no upgrade logic**, so it reaches an existing profile only through Restore Defaults or a
+> detection optimization. And the measurement-path hot-pixel repair is behind a new advanced option,
+> **Measurement Hotpixel Repair**, which is **off** for every existing configuration and for any settings file
+> that predates it; Restore Defaults and applying an optimization turn it on, because both re-derive the
+> acceptance gates it shifts. With the option off, detection is bit-identical to the pipeline before this
+> change. Every measurement below was taken with the repair ON, which is what it does once enabled.
+
 ## What shipped
 
-1. **`PSFResolution = 20` and `UsePSFAbsoluteDeviation = true` are the defaults** (recommendation 3).
+1. **`PSFResolution = 20`** becomes the default (recommendation 3). `UsePSFAbsoluteDeviation` was measured
+   alongside it and is NOT adopted, on cost grounds.
 2. **Saturated stars get no PSF fit** (recommendation 5). `Background + PeakBrightness >= SaturationThreshold`
    leaves `Star.PSF` null. It is not counted as a fit failure, because no fit was attempted.
-3. **The measurement image is repaired with an isolation test, not a median** (recommendation 4). The structure
-   (candidate-formation) image keeps the 3x3 median it has always had, so both images are now derived from the
-   same raw pixels rather than one feeding the other.
+3. **The measurement image is repaired with an isolation test, not a median** (recommendation 4), behind the new
+   **Measurement Hotpixel Repair** option. The structure (candidate-formation) image keeps the 3x3 median it has
+   always had, so both images are derived from the same raw pixels rather than one feeding the other.
 
 `StarDetector.StarDetectorVersion` goes 3 -> 4, so every cached detection result from a previous build misses.
 

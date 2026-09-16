@@ -50,6 +50,9 @@ namespace NINA.Joko.Plugins.HocusFocus.Tests.StarDetection {
         }
 
         private static StarDetectorParams Params(int binning = 1) => new StarDetectorParams {
+            // The option under test. It is OFF by default so an existing configuration keeps the legacy
+            // single-image behaviour; StarDetectorEquivalenceTests pins that off path as bit-identical.
+            MeasurementHotpixelRepair = true,
             HotpixelFiltering = true,
             HotpixelThresholdingEnabled = false,
             StarMeasurementNoiseReductionEnabled = false,

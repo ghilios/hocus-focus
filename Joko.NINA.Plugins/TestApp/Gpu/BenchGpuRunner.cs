@@ -70,6 +70,9 @@ namespace TestApp.Gpu {
             StructureLayers = layers,
             LocallyAdaptiveBinarization = true,
             AdaptiveNoiseBlockSize = 128,
+            // The bench exists to compare the two implementations of the CURRENT pipeline, so exercise the
+            // measurement/structure split rather than the legacy single-image path.
+            MeasurementHotpixelRepair = true,
         };
 
         private static async Task RunEarly(string[] args, bool compare) {

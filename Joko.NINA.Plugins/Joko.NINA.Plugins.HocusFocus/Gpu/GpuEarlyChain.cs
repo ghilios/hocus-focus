@@ -28,6 +28,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Gpu {
         public double HotpixelThreshold;
         public int NoiseReductionRadius;
         public bool StarMeasurementNoiseReductionEnabled;
+        public bool MeasurementHotpixelRepair;
         public double NoiseClippingMultiplier;
         public int EffectiveStructureLayers;
         public int StructureLayers;
@@ -207,42 +208,68 @@ namespace NINA.Joko.Plugins.HocusFocus.Gpu {
             // Steps 1-3: the measurement/structure split (StarDetector.PrepareMeasurementAndStructureSources).
             // The structure source starts from the RAW pixels and takes the median hotpixel filter; the
             // measurement image takes the isolation repair instead.
-            if (structureSource != null) {
-                // A caller only supplies a structure source because it already performed the split itself (the
-                // binning hoist), so the two images necessarily hold different pixels.
-                Upload(structureSource, dNoiseReduced);
-                measurementDiffers = true;
-            } else {
-                dMeas.View.CopyTo(stream, dNoiseReduced.View);
+            bool noiseReductionApplied = false;
+            if (!p.MeasurementHotpixelRepair && structureSource == null) {
+                // LEGACY PATH, mirroring StarDetector.PrepareMeasurementAndStructureSources' legacy branch: the
+                // median is applied in place to the measurement image and the structure source copies the RESULT.
                 if (p.HotpixelFiltering || (p.NoiseReductionRadius > 0 && p.StarMeasurementNoiseReductionEnabled)) {
                     if (!hotpixelAlreadyApplied) {
-                        hotpixelCount = ApplyHotpixelFilter(dNoiseReduced, p);
-                        measurementHotpixelCount = RepairIsolatedHotpixels(dMeas);
+                        hotpixelCount = ApplyHotpixelFilter(dMeas, p);
                         measurementMutated = true;
-                        measurementDiffers = true;
                     }
                     hotpixelFilteringApplied = true;
                 }
-            }
-
-            bool noiseReductionApplied = false;
-            if (p.NoiseReductionRadius > 0 && p.StarMeasurementNoiseReductionEnabled) {
-                Gaussian(dMeas, dMeas, p.NoiseReductionRadius * 2 + 1);
-                noiseReductionApplied = true;
-                measurementMutated = true;
-            }
-            Record("SrcImagePreparation");
-
-            // The structure source still needs its own hotpixel pass when the measurement image skipped one
-            // entirely (hotpixel filtering off, but a noise-reduction radius configured).
-            if (structureSource == null && !hotpixelFilteringApplied && p.NoiseReductionRadius > 0) {
-                hotpixelCount = ApplyHotpixelFilter(dNoiseReduced, p);
-                measurementDiffers = true;
-            }
-            if (p.NoiseReductionRadius > 0) {
-                Gaussian(dNoiseReduced, dNoiseReduced, p.NoiseReductionRadius * 2 + 1);
-                if (!noiseReductionApplied) {
+                if (p.NoiseReductionRadius > 0 && p.StarMeasurementNoiseReductionEnabled) {
+                    Gaussian(dMeas, dMeas, p.NoiseReductionRadius * 2 + 1);
+                    noiseReductionApplied = true;
+                    measurementMutated = true;
+                }
+                Record("SrcImagePreparation");
+                dMeas.View.CopyTo(stream, dNoiseReduced.View);
+                if (!hotpixelFilteringApplied && !noiseReductionApplied && p.NoiseReductionRadius > 0) {
+                    hotpixelCount = ApplyHotpixelFilter(dNoiseReduced, p);
+                }
+                if (p.NoiseReductionRadius > 0 && !noiseReductionApplied) {
+                    Gaussian(dNoiseReduced, dNoiseReduced, p.NoiseReductionRadius * 2 + 1);
                     measurementDiffers = true;
+                }
+            } else {
+                if (structureSource != null) {
+                    // A caller only supplies a structure source because it already performed the split itself (the
+                    // binning hoist), so the two images necessarily hold different pixels.
+                    Upload(structureSource, dNoiseReduced);
+                    measurementDiffers = true;
+                } else {
+                    dMeas.View.CopyTo(stream, dNoiseReduced.View);
+                    if (p.HotpixelFiltering || (p.NoiseReductionRadius > 0 && p.StarMeasurementNoiseReductionEnabled)) {
+                        if (!hotpixelAlreadyApplied) {
+                            hotpixelCount = ApplyHotpixelFilter(dNoiseReduced, p);
+                            measurementHotpixelCount = RepairIsolatedHotpixels(dMeas);
+                            measurementMutated = true;
+                            measurementDiffers = true;
+                        }
+                        hotpixelFilteringApplied = true;
+                    }
+                }
+
+                if (p.NoiseReductionRadius > 0 && p.StarMeasurementNoiseReductionEnabled) {
+                    Gaussian(dMeas, dMeas, p.NoiseReductionRadius * 2 + 1);
+                    noiseReductionApplied = true;
+                    measurementMutated = true;
+                }
+                Record("SrcImagePreparation");
+
+                // The structure source still needs its own hotpixel pass when the measurement image skipped one
+                // entirely (hotpixel filtering off, but a noise-reduction radius configured).
+                if (structureSource == null && !hotpixelFilteringApplied && p.NoiseReductionRadius > 0) {
+                    hotpixelCount = ApplyHotpixelFilter(dNoiseReduced, p);
+                    measurementDiffers = true;
+                }
+                if (p.NoiseReductionRadius > 0) {
+                    Gaussian(dNoiseReduced, dNoiseReduced, p.NoiseReductionRadius * 2 + 1);
+                    if (!noiseReductionApplied) {
+                        measurementDiffers = true;
+                    }
                 }
             }
             dNoiseReduced.View.CopyTo(stream, dStructure.View);

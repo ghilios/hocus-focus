@@ -13,6 +13,7 @@ These options live in the **Advanced** star-detection settings. In Simple mode o
 | Setting | Default | Range | Effect |
 |---|---|---|---|
 | Hotpixel Filtering | On | On / Off | Clean hot pixels out of the frame before detection |
+| Measurement Hotpixel Repair | Off for existing settings | On / Off | Repair only isolated hot pixels on the measurement image instead of running a median over it |
 | Use Hotpixel Thresholding | On | On / Off | On the structure image, replace only pixels that differ sharply from the median instead of blurring everything |
 | Hotpixel Threshold | 0.1% (0.001) | (0, 100%] | On the structure image, how far a pixel must sit from its 3×3 median (as a fraction of full well) to count as a hot pixel |
 | Saturation Threshold | 99% (0.99) | (0, 100%] | Pixels at or above this fraction of full well count as saturated; a star containing any gets no PSF model |
@@ -31,20 +32,28 @@ These options live in the **Advanced** star-detection settings. In Simple mode o
 
 A hot pixel is a single sensor cell that reads anomalously high regardless of incoming light. Left in the image it forms a tiny, sharp, one-pixel "star" that survives structure detection and contaminates HFR and star-count statistics. The median filter radius is fixed at 1 (a 3×3 window); only that size is supported.
 
-### Two images, two filters
+When noise reduction is in play, hot-pixel filtering also runs first so the hot pixels are not smeared into their neighbors by the noise-reduction blur. What that filtering *is* depends on **Measurement Hotpixel Repair**, below.
 
-Detection works on two derived images, and each gets the hot-pixel treatment that suits it.
+---
 
-The **structure image** is what star candidates are found in. It takes the 3×3 median described by the settings below. Candidate formation needs that smoothing: run it on an unfiltered frame and roughly a quarter of the detections are lost to noise.
+## Measurement Hotpixel Repair
 
-The **measurement image** is what each star's HFR and PSF model are measured from. It takes a targeted repair instead. A pixel is rewritten to its 3×3 median only when it stands more than five local noise sigmas above the local background *and* its brightest neighbor sits below a third of that amplitude. A hot pixel passes both tests, because its neighbors stay at background. A star core fails the second one, because its neighbors carry most of its light.
+**What it does:** repairs only isolated hot pixels on the image HFR and the PSF are measured from, instead of running a 3×3 median over all of it.
 
-That split exists because a median over the measurement image corrupts the very numbers that image exists to produce. On a real frame it drops a bright star's peak by about a fifth, widens its half-maximum width, and biases every fitted FWHM about 6% high, which also flattens roughly a third of the real focus gradient across the sensor. The targeted repair removes the hot pixels without touching the stars. The count of pixels it rewrote appears as **Repaired Hotpixels** in the [Star Detection Results panel](index.md#reading-the-results-the-star-detection-results-panel).
+- **Default:** Off for any settings that predate this option. Restore Defaults and applying an optimization turn it on.
+- **Range:** On / Off
 
-!!! note
-    Because the measurement image is no longer median-smoothed, its noise estimate is now the frame's honest noise rather than a suppressed one. The **Brightness Sensitivity** gate is expressed in multiples of that noise, so the same value now rejects more of the faintest stars than it used to. If a frame's star count dropped after upgrading and you want the fainter stars back, lower Brightness Sensitivity or re-run the optimization wizard.
+Detection works on two derived images. The **structure image** is what star candidates are found in; it always takes the 3×3 median described by the settings above, because candidate formation needs that smoothing. The **measurement image** is what each star's HFR and PSF model are measured from, and this setting decides how it is treated.
 
-When noise reduction is in play, hot-pixel filtering also runs first so the hot pixels are not smeared into their neighbors by the noise-reduction blur.
+With this **off**, the measurement image takes the same median. That median is an expensive filter for numbers measured off it: on a real frame it drops a bright star's peak by about a fifth, widens its half-maximum width, and biases every fitted FWHM about 6% high, which in turn flattens roughly a third of the real focus gradient across the sensor.
+
+With this **on**, a pixel on the measurement image is rewritten to its 3×3 median only when it stands more than five local noise sigmas above the local background *and* its brightest neighbor sits below a third of that amplitude. A hot pixel passes both tests, because its neighbors stay at background. A star core fails the second one, because its neighbors carry most of its light. The count of pixels rewritten appears as **Repaired Hotpixels** in the [Star Detection Results panel](index.md#reading-the-results-the-star-detection-results-panel).
+
+!!! warning "Why it is off for existing settings"
+    Turning this on also makes the measurement image's noise estimate the frame's honest noise rather than a median-suppressed one, and makes every star measure a smaller HFR. **Brightness Sensitivity** is expressed in multiples of that noise and **Min HFR** is an absolute floor, so both become effectively stricter at the same numbers, and a rig tuned without this may detect fewer faint stars. That is why it never switches itself on: it arrives with **Restore Defaults** or with applying an optimization, both of which re-derive those gates at the same time. Loading a settings file that has no such setting leaves it off.
+
+!!! tip "When this helps"
+    Turn it **on** if you care about FWHM, eccentricity or the aberration inspector's focus gradient, and re-run the optimization wizard afterwards so the gates are calibrated against it. Measured across the auto-focus bank it tightens the frame-to-frame FWHM spread on 16 of 19 runs. Structure detection is unaffected either way, and autofocus accuracy is unchanged.
 
 ![Raw frame with a hot pixel versus the same frame after a 3×3 median filter](../assets/figures/hot-pixel.png){ width=620 }
 *A single hot pixel (left) reads far above its neighbors; the 3×3 median (right) replaces it with the local median while leaving the real star untouched.*
