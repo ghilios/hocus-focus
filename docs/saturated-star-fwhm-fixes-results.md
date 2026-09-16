@@ -233,39 +233,39 @@ with 5000 stars the PSF stage now runs about 21 s rather than 2 s.
 
 ## Part 3 — Does losing faint stars cost anything? (AF-bank verification)
 
-Part 1 raises the question the PSF numbers cannot answer: the change moves which stars are detected, so are the
-ones it drops real? `bank-verify` answers it against the bank's detector-independent golden star sets, in the
-C0 as-default config at the shipped `NoiseClippingMultiplier` of 4, before and after, over all 19 runs.
+**RETRACTED AND BEING RE-RUN. The numbers that stood here were not measured on comparable arms.**
 
-Paired per run, so every number is the same run measured twice:
+The two `bank-verify` arms were launched without `--settings`, so each read whatever the default settings path
+resolved to for its own binary directory. They got different files: the before arm a 68-key bag exported from
+profile `astrodet`, the after arm a 44-key bag exported from profile `Default`. The reports also record different
+`profileId` values, so the two arms did not even load the same NINA profile. Every number in that comparison —
+recall, precision, sigma_focus, the sensor model — is confounded.
 
-| | mean before | mean after | better / worse / tied |
-|---|---|---|---|
-| recall @ SNR >= 12 | 0.6056 | 0.6502 | **13 / 1 / 3** |
-| recall @ all tiers | 0.4653 | 0.4944 | **13 / 1 / 3** |
-| precision | 0.9540 | 0.9504 | 4 / 8 / 5 |
-| detections | 6169 | 6360 | 13 / 1 / 5 |
-| AF sigma_focus (lower better) | | | 6 / 9 / 4 |
-| AF fit R^2 | 0.9962 | 0.9938 | 5 / 10 / 4 |
-| sensor model R^2 | 0.7376 | 0.7545 | 9 / 9 / 0 |
+That is also the whole of the "uniform 4x sensor RMS" this section previously reported as an unexplained scale
+change. Re-running one bank run (`Panos`) through the same `SensorModel.RegisterStarsAndFit` seam with
+`inspect-align --params default`, one build after the other, on the same profile and settings:
 
-**Recall is up and precision is not paid for it.** Recall against the high-confidence golden tier improves on
-13 of 17 scorable runs and drops on one (`vsn07`, 0.726 -> 0.668). Precision's median change is exactly zero and
-its mean moves 0.004. So the stars the change gains are real golden stars, and the ones it drops on some frames
-are not costing precision.
+| | before | after |
+|---|---|---|
+| Gx, Gy | 0.0655, 0.0748 | 0.0701, 0.0836 |
+| tilt magnitude `atan(sqrt(Gx^2+Gy^2))` | 5.71 deg | 6.23 deg |
+| RMS residual (microns) | 303.3 | 208.3 |
+| goodness of fit | 0.9880 | 0.9940 |
+| stars in model | 210 | 209 |
 
-**Autofocus is neutral.** sigma_focus and the AF fit R^2 are a coin flip run to run, with median changes of
-zero. Nothing here says the focus curve got better or worse, which is the answer this check existed to get:
-HFR shifted about 6% but autofocus fits a curve shape, not an absolute HFR.
+The sensor fit **improves** (residual -31%, goodness of fit 0.988 -> 0.994) on the same star population, and the
+recovered tilt is essentially unchanged. There was never a 4x.
 
-### One unexplained number
+Parts 1 and 2 are unaffected: both `star-probe` arms and both `psf-bank` arms were run against an explicitly
+pinned settings file, which the logs record.
 
-`sensor RMS` (the paraboloid fit's residual, in microns) falls by a near-constant factor on **every single run**:
-the after/before ratio runs 0.09 to 0.28 with a median of 0.24, across rigs from 10 to 2765 stars in the model.
-The sensor model's R^2 is essentially unchanged run by run over the same range, which means the fitted surface's
-own scale shrank by about the same factor. A uniform factor across every rig is a scale change, not a quality
-change, and the cause is not established here. It is recorded rather than claimed as an improvement, and it is
-worth a look before anyone reads sensor RMS as a regression signal.
+A corrected before/after verification with `--settings` pinned for both arms is running; this section will be
+replaced by its result.
+
+**The guard this needed.** `bank-verify` now records `settingsPath`, `settingsPinned` and the profile in both the
+JSON and the report header, prints the comparability line under the header, and writes a loud stderr warning when
+`--settings` was not given. `fitInputs`, which existed to make two reports comparable, did not catch this: its
+four AF-fit values happened to agree across the two different files.
 
 ---
 

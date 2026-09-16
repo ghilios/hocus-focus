@@ -154,6 +154,19 @@ namespace TestApp {
             // profile-sourced value is mutable machine state nothing records, and the ACTIVE profile can
             // even be a different telescope between runs. See HarnessSettingsStore.
             var harnessSettings = HarnessSettingsStore.Resolve(args, profileService, activeProfile);
+            // COMPARABILITY. A report is only comparable to another one when both ran the same settings file and
+            // the same NINA profile, and NEITHER is guaranteed unless --settings pins the file: the default path
+            // resolves per machine and per binary directory, so two arms of a before/after run can silently read
+            // different files and differ in everything downstream (the sensor model's microns-per-focuser-step
+            // included). Record what was actually used, and say so loudly when it was not pinned.
+            var settingsPinned = !string.IsNullOrWhiteSpace(DiagnosticUtil.GetArg(args, "--settings"));
+            if (!settingsPinned) {
+                Console.Error.WriteLine(
+                    "WARNING: no --settings was given, so this run read whatever harness settings file the default path " +
+                    $"resolved to ({harnessSettings.Path}). That path is per-machine and per-binary-directory, so this " +
+                    "report is NOT safely comparable to another one. Pin one file with --settings for every arm of a " +
+                    "before/after comparison.");
+            }
             var starDetectionOptions = new StarDetectionOptions(profileService, harnessSettings.Accessor);
             var accessor = harnessSettings.Accessor;
             var inspectorOptions = new InspectorOptions(profileService);
@@ -215,7 +228,7 @@ namespace TestApp {
             var utc = DateTime.UtcNow.ToString("yyyyMMddTHHmmssZ", CultureInfo.InvariantCulture);
             WriteReport(outDir, utc, commit, ncSweep, runResults,
                 EffectiveAdaptiveBinarize(adaptiveBinarizeOverride), adaptiveBinarizeOverride.HasValue, adaptiveBlockSize, pixelScaleMode,
-                fitInputs.ToString(), $"{activeProfile.Name} ({activeProfile.Id})");
+                fitInputs.ToString(), $"{activeProfile.Name} ({activeProfile.Id})", harnessSettings.Path, settingsPinned);
             Console.WriteLine($"bank-verify: wrote verification_{utc}.{{json,md}} to {outDir} ({runResults.Count(r => r.error == null)} ok, {runResults.Count(r => r.error != null)} failed).");
         }
 
@@ -619,7 +632,7 @@ namespace TestApp {
 
         private static void WriteReport(string outDir, string utc, string commit, double[] ncSweep, List<RunResult> runs,
             bool adaptiveBinarizeEffective, bool adaptiveBinarizeForced, int adaptiveBlockSize, string pixelScaleMode,
-            string fitInputs, string profileId) {
+            string fitInputs, string profileId, string settingsPath, bool settingsPinned) {
             var ok = runs.Where(r => r.error == null && r.configs != null && r.configs.Count > 0).ToList();
             // Read from the product rather than hardcoded — see the json block below for why (9a80324/c59a4b1).
             var noiseClipDefault = HocusFocusStarDetection.BuildDefaultStarDetectorParams().NoiseClippingMultiplier;
@@ -696,6 +709,10 @@ namespace TestApp {
                 // two reports with the same string are comparable regardless of which profile was active.
                 fitInputs,
                 profileId,
+                // Settings provenance (see the comparability warning above): two reports are comparable only when
+                // these match AND profileId matches.
+                settingsPath,
+                settingsPinned,
                 ncSweep,
                 runCount = ok.Count,
                 failed = runs.Count(r => r.error != null),
@@ -718,6 +735,10 @@ namespace TestApp {
             sb.AppendLine();
             sb.AppendLine($"generated: {utc}  |  detector commit: {commit}  |  NoiseClip default = {noiseClipDefault.ToString("0.#", CultureInfo.InvariantCulture)}  |  " +
                 $"pixel-scale mode: {pixelScaleMode}  |  NC sweep: {string.Join(", ", ncSweep.Select(x => x.ToString("0.#", CultureInfo.InvariantCulture)))}");
+            sb.AppendLine();
+            sb.AppendLine($"profile: `{profileId}`  |  settings: `{settingsPath}`{(settingsPinned ? " (pinned)" : " **(NOT pinned -- not comparable to another report)**")}");
+            sb.AppendLine();
+            sb.AppendLine("> Comparable to another report only when the profile and settings lines above match it.");
             sb.AppendLine();
             sb.AppendLine("## NoiseClippingMultiplier sweep (C0 as-default -- the honest recall reference)");
             sb.AppendLine();

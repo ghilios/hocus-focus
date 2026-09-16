@@ -127,6 +127,36 @@ silently ignored.
   measurement path's isolation repair acts on; it costs a full-frame scan, hence the flag. The
   "reconstruction repaired N" line must equal the detector's own `measurementRepaired`.
 
+## `inspect-align --sensor-diagnostics`
+
+Dumps the sensor model's own intermediates so a before/after pair can be compared at the level the fit actually
+consumes, rather than at its reported tilt angle:
+
+```bash
+TestApp inspect-align --runs "D:\Autofocus Bank\Panos\attempt01" --params default \
+  --sensor-diagnostics "C:\temp\sensor" --sensor-diagnostics-label panos_after
+```
+
+Writes `<label>_stars.csv` (one row per registered star, its sweep fit and how it entered the data-point list),
+`<label>_points.csv` (the paraboloid's `x_um, y_um, z_um, sigma_um, predicted, residual, enabled`) and
+`<label>_iterations.csv` (the winsorized solve's trajectory). Purely observational — the fit is bit-identical
+with the seam on. This is what settled whether a change had moved the recovered tilt or only the harness.
+
+## Pin `--settings` on EVERY arm of a comparison
+
+`HarnessSettingsStore` falls back to a DEFAULT PATH when `--settings` is absent, and that path resolves per
+machine and **per binary directory**. Two arms of a before/after run launched from two build outputs therefore
+read two different files, silently, each printing a plausible `Settings: <path>` banner. It cost a whole
+`bank-verify` before/after pair here: the before arm read a 68-key bag exported from profile `astrodet`, the
+after arm a 44-key bag from `Default`, and the two reports also recorded different `profileId`s. The visible
+symptom was a "uniform 4x" change in the sensor model that did not exist.
+
+- **Always pass `--settings <one file>` to every arm**, and check the `Settings:` banner and `profileId` agree.
+- `bank-verify` records `settingsPath`, `settingsPinned` and the profile in its JSON and report header, prints a
+  comparability line, and warns on stderr when `--settings` was omitted. **Two reports are comparable only when
+  those lines match.**
+- `fitInputs` is NOT sufficient: it carries four AF-fit values that can agree across two different files.
+
 ## Plugin settings export -> harness option bag (`convert-settings`)
 
 **The trap this exists for.** A harness `--settings` file is `{ Options: { "PSFResolution": "20", ... } }` —
@@ -233,7 +263,9 @@ dir (or each per-run subfolder).
 >
 > Since wave 11 the harness reads the fit inputs from the **pinned settings file**, and every landing records
 > `ProfileId` **and** `FitInputs` (`MaxOutlierRejections=…;OutlierRejectionConfidence=…;…` — values, not a hash,
-> so a reader sees *which* one moved). Since wave 12 **every** harness runner does — `bank-verify`,
+> so a reader sees *which* one moved). **`FitInputs` matching is NOT proof of comparability**: it is four values,
+> and two genuinely different settings files can agree on all four. Check `ProfileId` and the settings path too
+> — see "Pin `--settings` on EVERY arm of a comparison" above. Since wave 12 **every** harness runner does — `bank-verify`,
 > `synth-validate`, `inspect-align` and `tilt` build their fit through
 > `HarnessSettingsStore.BuildFitOptions`, print `FitInputs`, and a unit test fails the build if any `TestApp`
 > source constructs `AutoFocusOptions` from the profile again.
