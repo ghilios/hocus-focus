@@ -33,8 +33,17 @@ which is OFF unless a configuration was deliberately re-derived.** With it off t
 branch that is BIT-IDENTICAL to the pipeline before the option existed (pinned by
 `StarDetectorEquivalenceTests`, whose golden signature is once again develop's). The option turns itself on in
 exactly two places, both of which re-derive the acceptance gates in the same breath: `ResetDefaults` and
-`ApplyOptimizedSettings`. A profile load reads FALSE, and a settings file with no such field deserializes to
-FALSE, so neither can switch it on. Two tests assert the deliberate reset-vs-construction difference rather
+`ApplyOptimizedSettings`. An ESTABLISHED profile reads FALSE, and a settings file with no such field
+deserializes to FALSE, so neither can switch it on.
+
+**First-run seeding.** `InitializeOptions` seeds a BRAND-NEW profile by calling `ResetDefaults` and then
+`PersistAllSettings`, so a fresh install both gets the current defaults (this option among them) and writes
+every value down explicitly — which is what keeps a profile portable when a code default later changes. It
+tells a virgin profile from an established one by `IntermediateSavePath`, which `InitializeOptions`' first run
+has always written; from then on a `SettingsInitialized` marker answers instead. `PersistAllSettings` bypasses
+the change guard in every setter on purpose: `ResetDefaults` alone persists almost nothing, because a default
+that already equals what was just read is not a change. `FreshInstall_PersistsEveryOptionItReads` compares the
+accessor's read-key set against its written-key set, so the two lists cannot drift. Two tests assert the deliberate reset-vs-construction difference rather
 than skipping it (`DeliberatelyDiffersFromFreshConstruction`, and the second named exception in
 `BuildDefaultStarDetectorParams_MatchesConstructedOptionsBuild`).
 

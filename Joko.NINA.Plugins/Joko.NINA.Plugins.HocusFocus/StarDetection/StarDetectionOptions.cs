@@ -251,7 +251,26 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection {
             ConfigureSimpleSettings();
         }
 
+        /// <summary>
+        /// Marks a profile as having had this plugin's defaults written to it. See <see cref="InitializeOptions"/>.
+        /// Deliberately NOT part of <see cref="IStarDetectionOptions"/> or the settings snapshot: it is a bootstrap
+        /// marker, not a setting, so it is never exported, imported or diffed.
+        /// </summary>
+        private const string SettingsInitializedKey = "SettingsInitialized";
+
         private void InitializeOptions() {
+            // FIRST-RUN SEEDING. A profile that has never loaded this plugin holds no stored option at all, which
+            // on its own is indistinguishable from a long-standing profile whose user never changed anything —
+            // and seeding THAT one would silently move settings it was tuned against. The tie-break is that this
+            // method has ALWAYS written IntermediateSavePath on its first run, so a non-empty value there proves
+            // a prior load. Read both witnesses BEFORE the body below writes either.
+            //
+            // The point of seeding is portability: a fresh install ends up with every default written down
+            // explicitly, so exporting it, diffing it, or changing a default later all behave predictably instead
+            // of depending on which values happened to be absent.
+            var previouslyInitialized = optionsAccessor.GetValueBoolean(SettingsInitializedKey, false)
+                || !string.IsNullOrEmpty(optionsAccessor.GetValueString(nameof(IntermediateSavePath), ""));
+
             debugMode = optionsAccessor.GetValueBoolean("DetectionDebugMode", false);
             modelPSF = optionsAccessor.GetValueBoolean("ModelPSF", true);
             useAdvanced = optionsAccessor.GetValueBoolean("UseAdvanced", false);
@@ -327,6 +346,81 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection {
                 }
             }
             ConfigureSimpleSettings();
+
+            if (!previouslyInitialized) {
+                // A brand-new profile: apply defaults as its first action, then record that we did so. From here
+                // on the marker answers the question and the IntermediateSavePath witness is never consulted again.
+                ResetDefaults();
+                // ResetDefaults goes through the property setters, and every one of them writes only when the
+                // value CHANGES — so a default that already equalled what InitializeOptions just read persists
+                // NOTHING. Force the whole set down, which is the entire point of seeding: the profile ends up
+                // stating what it is, so a later change to a code default cannot silently move it.
+                PersistAllSettings();
+            }
+            optionsAccessor.SetValueBoolean(SettingsInitializedKey, true);
+        }
+
+        /// <summary>
+        /// Writes EVERY option to the accessor at its current value, bypassing the change guard in each setter.
+        /// Used only when seeding a brand-new profile. Keys and values mirror <see cref="InitializeOptions"/>
+        /// exactly; <c>FreshInstall_PersistsEveryOptionItReads</c> fails the build if the two ever diverge.
+        /// </summary>
+        private void PersistAllSettings() {
+            optionsAccessor.SetValueBoolean("DetectionDebugMode", debugMode);
+            optionsAccessor.SetValueBoolean("ModelPSF", modelPSF);
+            optionsAccessor.SetValueBoolean("UseAdvanced", useAdvanced);
+            optionsAccessor.SetValueEnum("PSFFitType", psfFitType);
+            optionsAccessor.SetValueEnum("Simple_NoiseLevel", simple_NoiseLevel);
+            optionsAccessor.SetValueEnum("Simple_PixelScale", simple_PixelScale);
+            optionsAccessor.SetValueEnum("Simple_FocusRange", simple_FocusRange);
+            optionsAccessor.SetValueDouble("PixelSampleSize", pixelSampleSize);
+            optionsAccessor.SetValueString(nameof(IntermediateSavePath), intermediateSavePath);
+            optionsAccessor.SetValueInt32("PSFParallelPartitionSize", psfParallelPartitionSize);
+            optionsAccessor.SetValueInt32("PSFResolution", psfResolution);
+            optionsAccessor.SetValueDouble("PSFFitThreshold", psfFitThreshold);
+            optionsAccessor.SetValueBoolean(nameof(UsePSFAbsoluteDeviation), usePSFAbsoluteDeviation);
+            optionsAccessor.SetValueDouble(nameof(HotpixelThreshold), hotpixelThreshold);
+            optionsAccessor.SetValueDouble(nameof(SaturationThreshold), saturationThreshold);
+            optionsAccessor.SetValueBoolean(nameof(ExcludeSaturatedStarsFromHFR), excludeSaturatedStarsFromHFR);
+            optionsAccessor.SetValueBoolean(nameof(MeasurementHotpixelRepair), measurementHotpixelRepair);
+            optionsAccessor.SetValueEnum(nameof(MeasurementAverage), measurementAverage);
+            optionsAccessor.SetValueBoolean(nameof(PSFPixelIntegration), psfPixelIntegration);
+            optionsAccessor.SetValueBoolean(nameof(UseOptimizedSettings), useOptimizedSettings);
+            optionsAccessor.SetValueString(OptimizedSettingsJsonKey,
+                optimizedSettings != null ? JsonConvert.SerializeObject(optimizedSettings) : "");
+            optionsAccessor.SetValueEnum<DetectionBinningEnum>(nameof(DetectionBinning), detectionBinning);
+            optionsAccessor.SetValueBoolean("HotpixelFiltering", hotpixelFiltering);
+            optionsAccessor.SetValueBoolean(nameof(HotpixelThresholdingEnabled), hotpixelThresholdingEnabled);
+            optionsAccessor.SetValueBoolean("UseAutoFocusCrop", useAutoFocusCrop);
+            optionsAccessor.SetValueBoolean(nameof(StarMeasurementNoiseReductionEnabled), starMeasurementNoiseReductionEnabled);
+            optionsAccessor.SetValueInt32("NoiseReductionRadius", noiseReductionRadius);
+            optionsAccessor.SetValueDouble("NoiseClippingMultiplier", noiseClippingMultiplier);
+            optionsAccessor.SetValueDouble("StarClippingMultiplier", starClippingMultiplier);
+            optionsAccessor.SetValueDouble("ContaminationSensitivity", contaminationSensitivity);
+            optionsAccessor.SetValueBoolean("RejectContaminatedStars", rejectContaminatedStars);
+            optionsAccessor.SetValueInt32("StructureLayers", structureLayers);
+            optionsAccessor.SetValueBoolean("DefocusAwareStructure", defocusAwareStructure);
+            optionsAccessor.SetValueInt32("StructureLayerBoost", structureLayerBoost);
+            optionsAccessor.SetValueDouble("BrightnessSensitivity", brightnessSensitivity);
+            optionsAccessor.SetValueDouble("StarPeakResponse", starPeakResponse);
+            optionsAccessor.SetValueDouble("MaxDistortion", maxDistortion);
+            optionsAccessor.SetValueBoolean("DefocusAwareGates", defocusAwareGates);
+            optionsAccessor.SetValueDouble("DefocusDistortionSizeReference", defocusDistortionSizeReference);
+            optionsAccessor.SetValueDouble("DefocusDistortionMinFactor", defocusDistortionMinFactor);
+            optionsAccessor.SetValueDouble("DefocusCenteringToleranceFactor", defocusCenteringToleranceFactor);
+            optionsAccessor.SetValueBoolean("DefocusAwareDonutDetection", defocusAwareDonutDetection);
+            optionsAccessor.SetValueInt32("DonutMorphCloseSize", donutMorphCloseSize);
+            optionsAccessor.SetValueBoolean("LocallyAdaptiveBinarization", locallyAdaptiveBinarization);
+            optionsAccessor.SetValueInt32("AdaptiveNoiseBlockSize", adaptiveNoiseBlockSize);
+            optionsAccessor.SetValueDouble("DonutMinAnnularityHoleFraction", donutMinAnnularityHoleFraction);
+            optionsAccessor.SetValueDouble("DonutMaxStreakEccentricity", donutMaxStreakEccentricity);
+            optionsAccessor.SetValueDouble("DonutSaturationBloomRadius", donutSaturationBloomRadius);
+            optionsAccessor.SetValueDouble("StarCenterTolerance", starCenterTolerance);
+            optionsAccessor.SetValueInt32("StarBackgroundBoxExpansion", starBackgroundBoxExpansion);
+            optionsAccessor.SetValueInt32("MinStarBoundingBoxSize", minStarBoundingBoxSize);
+            optionsAccessor.SetValueDouble("MinHFR", minHFR);
+            optionsAccessor.SetValueInt32("StructureDilationSize", structureDilationSize);
+            optionsAccessor.SetValueInt32("StructureDilationCount", structureDilationCount);
         }
 
         public void ResetDefaults() {

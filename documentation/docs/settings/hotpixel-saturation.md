@@ -40,7 +40,7 @@ When noise reduction is in play, hot-pixel filtering also runs first so the hot 
 
 **What it does:** repairs only isolated hot pixels on the image HFR and the PSF are measured from, instead of running a 3×3 median over all of it.
 
-- **Default:** Off for any settings that predate this option. Restore Defaults and applying an optimization turn it on.
+- **Default:** On for a new install. Off for any profile that predates this option, and for any settings file that does not mention it. Restore Defaults and applying an optimization turn it on.
 - **Range:** On / Off
 
 Detection works on two derived images. The **structure image** is what star candidates are found in; it always takes the 3×3 median described by the settings above, because candidate formation needs that smoothing. The **measurement image** is what each star's HFR and PSF model are measured from, and this setting decides how it is treated.
@@ -50,7 +50,7 @@ With this **off**, the measurement image takes the same median. That median is a
 With this **on**, a pixel on the measurement image is rewritten to its 3×3 median only when it stands more than five local noise sigmas above the local background *and* its brightest neighbor sits below a third of that amplitude. A hot pixel passes both tests, because its neighbors stay at background. A star core fails the second one, because its neighbors carry most of its light. The count of pixels rewritten appears as **Repaired Hotpixels** in the [Star Detection Results panel](index.md#reading-the-results-the-star-detection-results-panel).
 
 !!! warning "Why it is off for existing settings"
-    Turning this on also makes the measurement image's noise estimate the frame's honest noise rather than a median-suppressed one, and makes every star measure a smaller HFR. **Brightness Sensitivity** is expressed in multiples of that noise and **Min HFR** is an absolute floor, so both become effectively stricter at the same numbers, and a rig tuned without this may detect fewer faint stars. That is why it never switches itself on: it arrives with **Restore Defaults** or with applying an optimization, both of which re-derive those gates at the same time. Loading a settings file that has no such setting leaves it off.
+    Turning this on also makes the measurement image's noise estimate the frame's honest noise rather than a median-suppressed one, and makes every star measure a smaller HFR. **Brightness Sensitivity** is expressed in multiples of that noise and **Min HFR** is an absolute floor, so both become effectively stricter at the same numbers, and a rig tuned without this may detect fewer faint stars. That is why it never switches itself on for an existing profile: it arrives with **Restore Defaults**, or with applying an optimization, both of which re-derive those gates at the same time. Loading a settings file that does not mention it leaves it off. A brand-new profile has nothing to preserve, so it starts with the current defaults.
 
 !!! tip "When this helps"
     Turn it **on** if you care about FWHM, eccentricity or the aberration inspector's focus gradient, and re-run the optimization wizard afterwards so the gates are calibrated against it. Measured across the auto-focus bank it tightens the frame-to-frame FWHM spread on 16 of 19 runs. Structure detection is unaffected either way, and autofocus accuracy is unchanged.

@@ -1,4 +1,4 @@
-using NINA.Profile.Interfaces;
+﻿using NINA.Profile.Interfaces;
 using System;
 using System.Collections.Generic;
 using Color = System.Windows.Media.Color;
@@ -14,10 +14,20 @@ namespace NINA.Joko.Plugins.HocusFocus.Tests.TestDoubles {
 
         public int ReadCount { get; private set; }
 
-        public void Clear() => store.Clear();
+        /// <summary>Every key that has been READ, in first-read order. Lets a test assert that everything the
+        /// options class loads is also something it can persist, without restating the key list.</summary>
+        public IReadOnlyCollection<string> KeysRead => keysRead;
+
+        private readonly HashSet<string> keysRead = new(StringComparer.Ordinal);
+
+        public void Clear() {
+            store.Clear();
+            keysRead.Clear();
+        }
 
         private T Get<T>(string key, T defaultValue) {
             ReadCount++;
+            keysRead.Add(key);
             if (store.TryGetValue(key, out var value) && value is T typed) {
                 return typed;
             }
