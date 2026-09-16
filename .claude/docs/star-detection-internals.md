@@ -51,6 +51,10 @@ For the headless TestApp diagnostic that exercises this test, see `testapp-cli.m
   `measurementDiffersFromStructure` (not the old `NoiseReductionRadius > 0 && !noiseReductionApplied`) decides
   whether the measurement image gets its own K-σ estimate. The measurement σ is now the frame's HONEST noise
   — the median was suppressing it — which makes the `Sensitivity` gate bite harder at the same setting.
+- **GPU parity is exact, and checkable:** `bench-gpu --compare --image <frame>` prints
+  `measurement hotpixel repairs: cpu=N gpu=N` and the measurement-image diff. On the 61 MP investigated frame
+  both report 223982 repairs and the image is bit-identical (0 pixels differing). A zero on BOTH sides means the
+  repair never ran and the image diff proves nothing — the compare says so.
 - **Mirrors that must move together:** `Gpu/GpuEarlyChain.cs` (+ `IsolatedHotpixelRepairKernel`),
   `TestApp/Gpu/CpuEarlyChain.cs` (the `bench-gpu --compare` oracle), and `TestApp/StarProbeRunner.cs`'s
   measurement reconstruction. With `DetectionBinning > 1` the split happens at NATIVE resolution and both

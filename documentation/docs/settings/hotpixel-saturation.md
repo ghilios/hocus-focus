@@ -39,7 +39,7 @@ The **structure image** is what star candidates are found in. It takes the 3×3 
 
 The **measurement image** is what each star's HFR and PSF model are measured from. It takes a targeted repair instead. A pixel is rewritten to its 3×3 median only when it stands more than five local noise sigmas above the local background *and* its brightest neighbor sits below a third of that amplitude. A hot pixel passes both tests, because its neighbors stay at background. A star core fails the second one, because its neighbors carry most of its light.
 
-That split exists because a median over the measurement image is an expensive filter to run. On a real frame it drops a bright star's peak by about a fifth, widens its half-maximum width, and biases every fitted FWHM about 6% high, which also flattens roughly a third of the real focus gradient across the sensor. The targeted repair removes the hot pixels without touching the stars. The count of pixels it rewrote appears as **Repaired Hotpixels** in the [Star Detection Results panel](index.md#reading-the-results-the-star-detection-results-panel).
+That split exists because a median over the measurement image corrupts the very numbers that image exists to produce. On a real frame it drops a bright star's peak by about a fifth, widens its half-maximum width, and biases every fitted FWHM about 6% high, which also flattens roughly a third of the real focus gradient across the sensor. The targeted repair removes the hot pixels without touching the stars. The count of pixels it rewrote appears as **Repaired Hotpixels** in the [Star Detection Results panel](index.md#reading-the-results-the-star-detection-results-panel).
 
 !!! note
     Because the measurement image is no longer median-smoothed, its noise estimate is now the frame's honest noise rather than a suppressed one. The **Brightness Sensitivity** gate is expressed in multiples of that noise, so the same value now rejects more of the faintest stars than it used to. If a frame's star count dropped after upgrading and you want the fainter stars back, lower Brightness Sensitivity or re-run the optimization wizard.
@@ -63,15 +63,15 @@ When noise reduction is in play, hot-pixel filtering also runs first so the hot 
 - **Default:** On
 - **Range:** On / Off
 
-A plain 3×3 median replaces *every* pixel with its neighborhood median, which is effectively a light blur across the whole structure image. Thresholded filtering compares each pixel against its 3×3 median and only swaps it when the difference exceeds **Hotpixel Threshold**, so pixels that match their surroundings are left exactly as-is. It is somewhat more compute-intensive than the unconditional median.
+A plain 3×3 median replaces *every* pixel with its neighborhood median, which is effectively a light blur across the whole structure image. Thresholded filtering compares each pixel against its 3×3 median and only swaps it when the difference exceeds **Hotpixel Threshold**, so pixels that match their surroundings are left exactly as-is. It costs slightly more compute than the unconditional median: the same 3x3 median, plus a per-pixel comparison against it.
 
 This setting governs the **structure image only**. The measurement image, where HFR and the PSF are measured, always uses the isolation test described above, so neither of these settings can soften a star core there.
 
 !!! tip "When this helps"
-    Leave this **on** in almost all cases. Turning it **off** reverts the structure image to an unconditional median that blurs everything; Simple mode compensates for that blur by widening the noise-reduction radius.
+    Leave this **on** in almost all cases. Turning it **off** reverts the structure image to an unconditional median, which softens every pixel instead of only the outliers, and the only thing you gain is a slightly cheaper filtering pass.
 
 !!! note
-    When thresholding is **on**, the filter only replaces outlier pixels and does not blur, so Simple mode adds 1 to the noise-reduction radius (whenever hot-pixel filtering is on with thresholding enabled, the default) to compensate; with thresholding off, the plain median already blurs, so no extra radius is added.
+    When thresholding is **on**, the filter replaces only outlier pixels and does not blur, so Simple mode adds 1 to the noise-reduction radius to compensate. That extra radius applies only when hot-pixel filtering and thresholding are both on, which is the default. With thresholding **off**, the plain median already blurs, so no extra radius is added.
 
 ---
 
@@ -95,8 +95,8 @@ so at the 0.1% default a pixel must exceed its local median by one part in a tho
 !!! tip "When this helps"
     Leave the default unless you have a specific reason. **Lower** the threshold if obvious hot pixels are surviving and being detected as stars; **raise** it if the filter is clipping the bright cores of real, well-sampled stars. Because the threshold is a fixed fraction of full well rather than a multiple of the frame's noise, the same value sits many times the noise at low gain and below the noise at high gain, so re-check it if you change gain or exposure substantially.
 
-!!! warning
-    The threshold is a fraction of full well, not an absolute ADU count. Setting it too low on a high-bit-depth sensor can replace the peak pixels of sharp, in-focus stars and bias HFR low.
+!!! note
+    Setting this very low makes the structure image nearly an unconditional median, since almost every pixel then differs from its own 3x3 median by more than the threshold. That softens the image candidates are found in. It cannot reach HFR or the PSF, which are measured from the separate measurement image.
 
 ---
 

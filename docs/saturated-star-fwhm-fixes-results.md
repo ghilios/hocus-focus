@@ -140,7 +140,7 @@ against the old, suppressed sigma; the shipped default of 10.0 costs nothing ban
 One frame per run, the nearest-focus frame of each of the 19 runs in `D:\Autofocus Bank`, detected with
 `ModelPSF` on at the **shipped defaults** rather than any saved settings. The frames are pinned in a manifest
 chosen once, because the change moves HFR and re-selecting per arm would compare different frames. Rigs span
-0.3 to 3 arcsec/px, mono and bayered, 8 MP to 102 MP, in focus to heavily defocused.
+0.28 to 5.97 arcsec/px, mono and bayered, 9.8 MP to 102 MP, and 23 to 5581 detected stars per frame.
 
 ### Fit quality
 
@@ -231,6 +231,63 @@ with 5000 stars the PSF stage now runs about 21 s rather than 2 s.
 
 ---
 
+## Part 3 — Does losing faint stars cost anything? (AF-bank verification)
+
+Part 1 raises the question the PSF numbers cannot answer: the change moves which stars are detected, so are the
+ones it drops real? `bank-verify` answers it against the bank's detector-independent golden star sets, in the
+C0 as-default config at the shipped `NoiseClippingMultiplier` of 4, before and after, over all 19 runs.
+
+Paired per run, so every number is the same run measured twice:
+
+| | mean before | mean after | better / worse / tied |
+|---|---|---|---|
+| recall @ SNR >= 12 | 0.6056 | 0.6502 | **13 / 1 / 3** |
+| recall @ all tiers | 0.4653 | 0.4944 | **13 / 1 / 3** |
+| precision | 0.9540 | 0.9504 | 4 / 8 / 5 |
+| detections | 6169 | 6360 | 13 / 1 / 5 |
+| AF sigma_focus (lower better) | | | 6 / 9 / 4 |
+| AF fit R^2 | 0.9962 | 0.9938 | 5 / 10 / 4 |
+| sensor model R^2 | 0.7376 | 0.7545 | 9 / 9 / 0 |
+
+**Recall is up and precision is not paid for it.** Recall against the high-confidence golden tier improves on
+13 of 17 scorable runs and drops on one (`vsn07`, 0.726 -> 0.668). Precision's median change is exactly zero and
+its mean moves 0.004. So the stars the change gains are real golden stars, and the ones it drops on some frames
+are not costing precision.
+
+**Autofocus is neutral.** sigma_focus and the AF fit R^2 are a coin flip run to run, with median changes of
+zero. Nothing here says the focus curve got better or worse, which is the answer this check existed to get:
+HFR shifted about 6% but autofocus fits a curve shape, not an absolute HFR.
+
+### One unexplained number
+
+`sensor RMS` (the paraboloid fit's residual, in microns) falls by a near-constant factor on **every single run**:
+the after/before ratio runs 0.09 to 0.28 with a median of 0.24, across rigs from 10 to 2765 stars in the model.
+The sensor model's R^2 is essentially unchanged run by run over the same range, which means the fitted surface's
+own scale shrank by about the same factor. A uniform factor across every rig is a scale change, not a quality
+change, and the cause is not established here. It is recorded rather than claimed as an improvement, and it is
+worth a look before anyone reads sensor RMS as a regression signal.
+
+---
+
+## GPU parity
+
+The GPU early span is documented as an exact mirror of the CPU pipeline, so the isolation repair was written as
+a matching kernel rather than left to fall back. `bench-gpu --compare` on the investigated frame, against the
+CPU oracle:
+
+```
+measurement hotpixel repairs: cpu=223982 gpu=223982 EXACT
+measurement differs from structure: cpu=True gpu=True EXACT
+measurement image: max-abs-diff=0.00E+000, pixels-differing=0
+K-sigma measurement: sigma rel-delta=9.91E-014
+```
+
+The repaired measurement image is **bit-identical** on both paths, and both agree with the detector's own
+`MeasurementHotpixelCount`. The structure map keeps its pre-existing 1.19E-7 float-ordering divergence, which
+flips zero binarized pixels.
+
+---
+
 ## Reproducing
 
 ```bash
@@ -250,5 +307,16 @@ $EXE psf-bank --runs "D:\Autofocus Bank" --out <dir> --select
 $EXE psf-bank --runs "D:\Autofocus Bank" --out <dir> --manifest <dir>\psf_bank_manifest.json --label after
 ```
 
+The bank verification and GPU parity:
+
+```bash
+$EXE bank-verify --runs "D:\Autofocus Bank" --out <dir> --nc-sweep 4 --match-radius 12 --commit <hash>
+$EXE bench-gpu --compare --image "<frame>.xisf"
+```
+
 The before arm is the same commands against a build of the parent commit, in a worktree with the NINA deploy
 step disabled. See `.claude/docs/testapp-cli.md`.
+
+The raw outputs every table above is computed from are committed under `docs/data/`:
+`psf-bank-before.csv` / `psf-bank-after.csv` (per run), `psf-bank-sub_res*.csv` (the four timing-decomposition
+arms), and `bank-verify-before.md` / `bank-verify-after.md`.
