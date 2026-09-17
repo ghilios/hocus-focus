@@ -98,3 +98,7 @@ orleans.codegen.cs
 
 ilnumerics.*
 
+
+# Presentation build tooling
+presentations/**/node_modules/
+presentations/**/render/
