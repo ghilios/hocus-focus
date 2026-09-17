@@ -143,7 +143,8 @@ namespace TestApp {
             DetectionBinningResolver.ApplyFactor(p, DetectionBinningResolver.ToFactor(options.DetectionBinning));
             Console.WriteLine($"PSFFitType={p.PSFFitType}, PSFResolution={p.PSFResolution}, PSFGoodnessOfFitThreshold={p.PSFGoodnessOfFitThreshold}, " +
                 $"SaturationThreshold={p.SaturationThreshold.ToString(CultureInfo.InvariantCulture)}, HotpixelFiltering={p.HotpixelFiltering}, " +
-                $"HotpixelThresholdingEnabled={p.HotpixelThresholdingEnabled}, StarMeasurementNoiseReduction={p.StarMeasurementNoiseReductionEnabled}, " +
+                $"HotpixelThresholdingEnabled={p.HotpixelThresholdingEnabled}, MeasurementHotpixelRepair={p.MeasurementHotpixelRepair}, " +
+                $"StarMeasurementNoiseReduction={p.StarMeasurementNoiseReductionEnabled}, " +
                 $"DetectionBinning={p.DetectionBinning}");
 
             var result = await source.DetectAsync(Detector, p, CancellationToken.None);

@@ -10,7 +10,10 @@ What changed, and what it measurably does. The design and the evidence behind it
 > **Measurement Hotpixel Repair**, which is **off** for every existing configuration and for any settings file
 > that predates it; Restore Defaults and applying an optimization turn it on, because both re-derive the
 > acceptance gates it shifts. With the option off, detection is bit-identical to the pipeline before this
-> change. Every measurement below was taken with the repair ON, which is what it does once enabled.
+> change. Every measurement below was taken with the repair ON, which is what it does once enabled, and at the
+> shipped PSF settings. An earlier revision of this document measured the after arm with
+> `UsePSFAbsoluteDeviation` on, while it was still a candidate default; those tables have been re-measured. The
+> two places it mattered are the frame's FWHM MAD (Part 1) and the PSF runtime, which is 2.3x rather than 11x.
 
 ## What shipped
 
@@ -44,8 +47,10 @@ rewrites star cores.
 
 **Frame:** `LIGHT_2026-09-15_21-16-16_O_0.00_300.00s_0441.xisf` (Sh2-129, O-III, 300 s, QHY600M mono, 9576x6388,
 0.8793 arcsec/px).
-**Settings:** the user's exported per-filter set for filter O, converted to a harness option bag. The after arm
-differs by exactly two keys, `PSFResolution` 10 -> 20 and `UsePSFAbsoluteDeviation` False -> True.
+**Settings:** the user's exported per-filter set for filter O, converted to a harness option bag. The **after**
+arm is what ships: `PSFResolution` 10 -> 20 with **Measurement Hotpixel Repair** on and `UsePSFAbsoluteDeviation`
+left off. A third column adds `UsePSFAbsoluteDeviation` — it was briefly a default and then dropped on cost
+grounds, and it is carried here because it is the only one of the three that changes the per-star FWHM spread.
 
 > **A trap worth recording.** `--settings` takes a harness option bag. Handing the runners the plugin's own
 > `O_settings.json` export instead produces an *empty* bag and a run at stock defaults, with no error and no
@@ -55,42 +60,55 @@ differs by exactly two keys, `PSFResolution` 10 -> 20 and `UsePSFAbsoluteDeviati
 
 ### Frame totals
 
-| | before | after | |
-|---|---|---|---|
-| detected stars | 1737 | 1439 | -17.2% |
-| PSF fits accepted | 1511 | 1099 | |
-| saturated stars | 5 | 6 | |
-| saturated stars carrying a PSF | 5 | **0** | |
-| measurement hot pixels repaired | n/a | 223 982 | 0.37% of the frame |
-| HFR median | 2.4001 | 2.3010 | -4.1% |
-| FWHM median (px) | 4.1014 | 3.8101 | -7.1% |
-| FWHM MAD (px) | 0.2297 | 0.2029 | -11.7% |
-| FWHM p95 (px) | 4.5011 | 4.2439 | |
-| FWHM max (px) | 6.0594 | 4.6982 | |
-| `scatterSD` (px) | 0.1954 | 0.1224 | -37.4% |
-| top-to-bottom FWHM gradient (px) | +0.3030 | +0.4108 | +35.6% |
+| | before | after (shipped) | | + PSF MAD fitting |
+|---|---|---|---|---|
+| detected stars | 1737 | 1439 | -17.2% | 1439 |
+| PSF fits accepted | 1511 | 1095 | | 1099 |
+| saturated stars | 5 | 6 | | 6 |
+| saturated stars carrying a PSF | 5 | **0** | | 0 |
+| measurement hot pixels repaired | n/a | 223 982 | 0.37% of the frame | 223 982 |
+| HFR median | 2.4001 | 2.3010 | -4.1% | 2.3010 |
+| FWHM median (px) | 4.1014 | 3.8030 | -7.3% | 3.8101 |
+| FWHM MAD (px) | 0.2297 | 0.2269 | -1.2% | 0.2029 |
+| FWHM p95 (px) | 4.5011 | 4.2462 | | 4.2439 |
+| FWHM max (px) | 6.0594 | 4.6997 | | 4.6982 |
+| `scatterSD` (px) | 0.1954 | 0.1361 | -30.3% | 0.1224 |
+| top-to-bottom FWHM gradient (px) | +0.3030 | +0.4628 | +52.7% | +0.4108 |
 
 ### The same stars, measured twice
 
-1058 unsaturated stars have an accepted fit in both arms. Restricting to those removes composition from the
-comparison:
+1053 unsaturated stars have an accepted fit in both arms (1058 for the MAD-fitting column). Restricting to
+those removes composition from the comparison:
 
-| | before | after | |
-|---|---|---|---|
-| FWHM median (px) | 4.0892 | 3.8101 | -6.8% |
-| FWHM MAD (px) | 0.2059 | 0.2029 | -1.5% |
-| `scatterSD` (px) | 0.1465 | 0.1216 | -17.0% |
-| HFR median (px) | 2.4226 | 2.2918 | -5.4% |
-| top-to-bottom gradient (px) | +0.2964 | +0.4121 | +39.0% |
-| R^2 median | 0.9762 | 0.9592 | |
+| | before | after (shipped) | | + PSF MAD fitting |
+|---|---|---|---|---|
+| FWHM median (px) | 4.0893 | 3.8046 | -7.0% | 3.8101 |
+| FWHM MAD (px) | 0.2062 | 0.2273 | **+10.3%** | 0.2029 |
+| `scatterSD` (px) | 0.1458 | 0.1288 | -11.7% | 0.1216 |
+| HFR median (px) | 2.4229 | 2.2915 | -5.4% | 2.2918 |
+| top-to-bottom gradient (px) | +0.2971 | +0.4648 | +56.4% | +0.4121 |
+| R^2 median | 0.9763 | 0.9598 | | 0.9592 |
 
-Per star, the median FWHM moves -0.2489 px and the median HFR -0.1200 px.
+Per star, the median FWHM moves -0.2439 px and the median HFR -0.1201 px.
 
 These land where the investigation predicted: it expected the repair to take ~5.8% off the median FWHM and to
-show the focus gradient ~43% larger, and both hold. What it did **not** predict is the per-star precision: it
-expected MAD to worsen ~20%, because the median was also suppressing noise. It does not, because recommendation
-3 pulls in the other direction by about the same amount. The two recommendations were measured separately and
-happen to cancel.
+show the focus gradient larger, and both hold — the gradient more than it guessed.
+
+**FWHM MAD rises and `scatterSD` falls, and that is not a contradiction.** MAD is the spread of every fitted
+width on the frame, so it contains the focus gradient across the sensor; `scatterSD` is the residual after a
+quadratic field model is removed, so it is the per-star precision alone. The median filter was flattening the
+gradient — +0.297 px top to bottom becomes +0.465 px once it is gone — and a flattened field reads as a tighter
+MAD. Take the field out and precision is 11.7% **better**, not worse.
+
+That the extra spread is field structure rather than noise is directly testable, and it holds: restricted to the
+brightest quartile of matched stars, where photon noise is negligible, MAD rises 17.5% (0.1625 -> 0.1909 arcsec);
+restricted further to stars whose fit clears R^2 0.98 in both arms it rises 23.2%. In the FAINTEST quartile — the
+stars a noise explanation would hit hardest — it does not move at all (0.2293 -> 0.2259). Noise would do the
+opposite of this.
+
+`UsePSFAbsoluteDeviation` is the only one of the three knobs that pulls MAD back down (0.2273 -> 0.2029), which
+is why the pre-review measurement, taken with it on, read -1.5% here. It is not shipped, so +10.3% is the number
+a user sees.
 
 ### Saturated stars
 
@@ -160,21 +178,24 @@ what a single user would see.
 | | before | after | median per-run change |
 |---|---|---|---|
 | detected stars | 400 | 431 | 0.0% |
-| PSF fits accepted | 292 | 291 | 0.0% |
-| PSF fits failed | 96 | 135 | +17.0% |
+| PSF fits accepted | 292 | 292 | 0.0% |
+| PSF fits failed | 96 | 138 | +17.1% |
 | HFR median (px) | 1.8559 | 1.7631 | -6.6% |
-| FWHM median (px) | 3.7029 | 3.4676 | -10.2% |
-| FWHM MAD (px) | 0.3275 | 0.2968 | -9.9% |
-| FWHM max (px) | 5.5955 | 4.6512 | -14.5% |
-| `scatterSD` (px) | 0.2702 | 0.1892 | **-21.9%** |
-| eccentricity median | 0.4211 | 0.4434 | +4.3% |
-| R^2 median | 0.9662 | 0.9658 | -0.2% |
+| FWHM median (px) | 3.7029 | 3.4596 | -9.2% |
+| FWHM MAD (px) | 0.3275 | 0.2976 | -4.3% |
+| FWHM max (px) | 5.5955 | 4.6356 | -13.0% |
+| `scatterSD` (px) | 0.2702 | 0.1935 | **-22.2%** |
+| eccentricity median | 0.4211 | 0.4485 | +5.0% |
+| R^2 median | 0.9662 | 0.9659 | -0.2% |
 
 The direction is consistent rather than an average of wins and losses:
 
-- `scatterSD` improves on **16 of 19** runs (median ratio 0.78).
-- FWHM MAD improves on **17 of 19** (median ratio 0.90).
-- FWHM maximum falls on **18 of 19** (median ratio 0.86) — mostly the saturated stars leaving the distribution.
+- `scatterSD` — the per-star precision, after the field shape is removed — improves on **16 of 19** runs
+  (median ratio 0.78).
+- FWHM MAD, which still contains the field shape, improves on **14 of 19** (median ratio 0.96). It is the weaker
+  number for the reason Part 1 sets out: on a frame with a real focus gradient, taking the median filter off lets
+  that gradient into the spread. `scatterSD` is the one to read for precision.
+- FWHM maximum falls on **17 of 19** (median ratio 0.87) — mostly the saturated stars leaving the distribution.
 - Saturated stars go 68 -> 154 across the bank, and **none of them carries a PSF**. The count rises because the
   measurement image is no longer median-suppressed, so a clipped core now reads its true clipped value.
 
@@ -188,7 +209,7 @@ with a Brightness Sensitivity of 13.67 that an optimization run had landed again
 estimate. At the shipped default of 10.0 the honest sigma costs nothing bank-wide. The exposure is to settings
 tuned against the old sigma, not to the default configuration.
 
-PSF acceptance rate moves 0.847 -> 0.823 (per-run medians), and fit failures rise 17%: with the measurement
+PSF acceptance rate moves 0.847 -> 0.825 (per-run medians), and fit failures rise 17%: with the measurement
 image's noise no longer suppressed, more fits land under the fixed R^2 gate of 0.9. The median R^2 of the fits
 that ARE accepted is unchanged (-0.2%), so this is the gate biting, not the fits degrading. Lowering
 **PSF Fit Threshold** is the lever if a rig wants those stars back.
@@ -199,25 +220,26 @@ This is the real cost of the change, and it is not small.
 
 | across all 19 frames | before | after | |
 |---|---|---|---|
-| detection, PSF off | 54.6 s | 58.9 s | **1.08x** |
-| PSF stage | 10.3 s | 114.1 s | **11.1x** |
-| stars fitted | 18 274 | 17 013 | |
-| ms per fitted star | 0.56 | 6.71 | 11.95x |
+| detection, PSF off | 54.6 s | 59.7 s | **1.09x** |
+| PSF stage | 10.3 s | 23.5 s | **2.3x** |
+| stars fitted | 18 274 | 17 005 | |
+| ms per fitted star | 0.56 | 1.38 | 2.46x |
 
-**Detection itself costs 8% more.** That is the isolation repair: a full-frame clone, a coarse local-background
+**Detection itself costs 9% more.** That is the isolation repair: a full-frame clone, a coarse local-background
 grid, and one parallel pass, against the median filter it replaces. This is the number that matters for
 autofocus, which runs with `ModelPSF` off.
 
-**PSF modelling costs about 11x more**, entirely from the two new defaults. Splitting them apart over six of
+**PSF modelling costs about 2.3x more**, all of it `PSFResolution`. The measured-but-not-shipped
+`UsePSFAbsoluteDeviation` is what would have made this 11x. Splitting the two apart over six of
 the bank's frames (all four arms on the after build, so the measurement repair is common to all of them, and
 `ms/star` normalises out the star count):
 
 | arm | PSF stage | vs old | ms per fitted star | FWHM MAD | vs old | `scatterSD` | vs old | fits accepted |
 |---|---|---|---|---|---|---|---|---|
 | resolution 10, least squares (the old default) | 7.2 s | 1.00x | 0.51 | 0.2106 | | 0.1908 | | 75.0% |
-| resolution 20, least squares | 13.1 s | **1.83x** | 0.93 | 0.1983 | -4.5% | 0.1781 | **-6.4%** | 74.9% |
+| resolution 20, least squares (**the new default**) | 13.1 s | **1.83x** | 0.93 | 0.1983 | -4.5% | 0.1781 | **-6.4%** | 74.9% |
 | resolution 10, Huber | 40.1 s | **5.60x** | 2.84 | 0.2044 | -2.3% | 0.1887 | -1.1% | 75.1% |
-| resolution 20, Huber (the new default) | 77.3 s | **10.80x** | 5.49 | 0.1954 | -5.3% | 0.1761 | **-7.7%** | 75.0% |
+| resolution 20, Huber (measured, not shipped) | 77.3 s | **10.80x** | 5.49 | 0.1954 | -5.3% | 0.1761 | **-7.7%** | 75.0% |
 
 The two knobs are not equal value for money:
 
@@ -225,9 +247,9 @@ The two knobs are not equal value for money:
 - **`UsePSFAbsoluteDeviation` is where the cost is.** On its own it is 5.6x the time for 1.1% off the scatter.
   Adding it on top of resolution 20 takes 1.8x to 10.8x and moves the scatter from -6.4% to -7.7%.
 
-So roughly **80% of the added cost buys the last 20% of the improvement.** Both are shipped as defaults here,
-but a rig that cares about analysis latency more than about the last bit of FWHM consistency should turn
-**PSF MAD Fitting** off and keep **PSF Resolution** at 20: that lands at 1.8x for most of the benefit.
+So roughly **80% of the added cost buys the last 20% of the improvement**, which is why only resolution 20
+ships. A rig that wants the last bit of FWHM consistency and does not mind the latency can turn **PSF MAD
+Fitting** on; it is the one knob that also pulls the frame's FWHM MAD back down (Part 1).
 
 Note the fit acceptance rate is **identical (75.0%) in all four arms**. The rise in failed fits reported above
 is therefore entirely the measurement image's honest noise against a fixed R^2 gate, not something either of the
@@ -235,9 +257,10 @@ two settings does.
 
 ### What this does not cover
 
-Autofocus runs with `ModelPSF` off, so the 11x does not touch it; the 8% is what autofocus pays. PSF modelling
-is what the Star Detection Results panel, the Aberration Inspector and Review Frames use, and on a 100 MP frame
-with 5000 stars the PSF stage now runs about 21 s rather than 2 s.
+Autofocus runs with `ModelPSF` off, so the 2.3x does not touch it; the 9% is what autofocus pays. PSF modelling
+is what the Star Detection Results panel, the Aberration Inspector and Review Frames use, and on the bank's
+102 MP frame with 2900 fitted stars the PSF stage now runs about 4.3 s rather than 2.3 s. With
+**PSF MAD Fitting** turned on it would be 21 s, which is why that one is not a default.
 
 ---
 
@@ -426,7 +449,8 @@ EXE=Joko.NINA.Plugins/TestApp/bin/Debug/net8.0-windows7.0/TestApp.exe
 # The settings conversion the frame comparison depends on
 $EXE convert-settings --import O_settings.json --out harness_before.json
 $EXE convert-settings --import O_settings.json --out harness_after.json \
-     --set PSFResolution=20 --set UsePSFAbsoluteDeviation=True
+     --set PSFResolution=20 --set MeasurementHotpixelRepair=True
+# the measured-but-not-shipped variant adds --set UsePSFAbsoluteDeviation=True
 
 # The frame
 $EXE star-probe --image "<frame>.xisf" --settings harness_after.json --out <dir> \
@@ -449,6 +473,7 @@ The before arm is the same commands against a build of the parent commit, in a w
 step disabled. See `.claude/docs/testapp-cli.md`.
 
 The raw outputs every table above is computed from are committed under `docs/data/`:
-`psf-bank-before.csv` / `psf-bank-after.csv` (per run), `psf-bank-sub_res*.csv` (the four timing-decomposition
-arms), `bank-verify-before.md` / `bank-verify-after.md` (the real bank) and `synth-verify-before.md` /
-`synth-verify-after.md` (the synthetic bank).
+`psf-bank-before.csv` / `psf-bank-after.csv` (per run, the shipped arm), `psf-bank-after-absdev.csv` (the same
+frames with `UsePSFAbsoluteDeviation` on — the measured-but-not-shipped variant), `psf-bank-sub_res*.csv` (the
+four timing-decomposition arms), `bank-verify-before.md` / `bank-verify-after.md` (the real bank) and
+`synth-verify-before.md` / `synth-verify-after.md` (the synthetic bank).

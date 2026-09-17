@@ -53,6 +53,14 @@ measures a smaller HFR, so `MinHFR` is a stricter floor. Which one bites depends
 frame lost 17% of its stars to Sensitivity, a synthetic frame lost 24% to MinHFR, and the real bank at defaults
 was a wash. See `docs/saturated-star-fwhm-fixes-results.md`.
 
+**`FWHM MAD` in the results panel goes UP when this is enabled, and that is correct.** MAD is the spread over
+the whole frame, so it contains the focus gradient across the sensor; the median filter was flattening that
+gradient (0.30 -> 0.46 px top to bottom on the investigated frame) and a flattened field reads as a tighter MAD.
+Per-star precision — the residual after a quadratic field model is removed — improves ~12% on the same stars,
+and ~22% bank-wide. Do not "fix" the MAD rise: it is concentrated in the BRIGHTEST quartile (+17.5%, +23.2%
+restricted to R^2 > 0.98 in both arms) and absent in the faintest, which is the opposite of what measurement
+noise would do. `UsePSFAbsoluteDeviation` is the only knob that pulls MAD back down, and it is not a default.
+
 When ON, `BuildDetectionContextInternal` derives TWO images from the same raw pixels and filters each
 differently (`StarDetector.PrepareMeasurementAndStructureSources`):
 

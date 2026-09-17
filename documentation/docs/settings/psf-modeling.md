@@ -4,7 +4,7 @@ After a star is detected and its HFR measured, Hocus Focus can fit an analytic *
 
 ![The PSF modeling settings highlighted in the advanced list: Fit PSF, PSF Type, PSF Resolution, PSF Fit Threshold, PSF Pixel Integration and PSF MAD Fitting](../assets/screenshots/advanced-psf-modeling.png){ width=375 }
 
-*Where the PSF settings live in the advanced list. This capture predates the current defaults: it shows PSF Resolution 10 and PSF MAD Fitting off, which now ship as 20 and on.*
+*Where the PSF settings live in the advanced list. This capture predates the current default for PSF Resolution, which now ships as 20.*
 
 These settings live under the **Advanced** star-detection options. They do not affect star *acceptance* (which stars pass the [acceptance gates](acceptance-gates.md)). They only affect the per-star *shape measurement* that PSF fitting produces.
 
