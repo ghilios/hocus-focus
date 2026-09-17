@@ -100,6 +100,9 @@ dotnet Joko.NINA.Plugins/TestApp/bin/Debug/net8.0-windows7.0/TestApp.dll star-pr
   --out "C:\temp\probe" --near 4707,3262 --radius 260 --psf-sweep
 ```
 
+**Pass a HARNESS settings file, not a plugin export** — see `convert-settings` below for why an export is
+silently ignored.
+
 - Args: `--image` (req), `--settings` / `--profile-id` (same pinning rules as every harness runner), `--out`
   (default `%LOCALAPPDATA%\NINA\Logs\hf-diag\star-probe\<timestamp>`), `--near <x,y>` + `--radius <px>`
   (default 250) to select the console table, `--top <n>` (default 25; brightest first), `--psf-sweep`.
@@ -117,6 +120,88 @@ dotnet Joko.NINA.Plugins/TestApp/bin/Debug/net8.0-windows7.0/TestApp.dll star-pr
   fitted in binned pixels, so for those the census columns are left empty and the sweep is skipped.
 - The amplitude bound shows up here: a fitted `psfPeak` of exactly `2` (with `psfBackground` 0) is a fit pinned
   at its limits, not a measurement.
+- **The rejection census** (candidates, and the per-gate rejection counts) prints under the detected count, so a
+  change in detected stars can be attributed to a gate rather than guessed at.
+- **`--hotpixel-census`** reports, for the RAW measurement image, how many pixels sit above the local background
+  by 3/5/8 local sigmas and how many of those are isolated at ratios 3/2/1. That is the population the
+  measurement path's isolation repair acts on; it costs a full-frame scan, hence the flag. The
+  "reconstruction repaired N" line must equal the detector's own `measurementRepaired`.
+
+## `inspect-align --sensor-diagnostics`
+
+Dumps the sensor model's own intermediates so a before/after pair can be compared at the level the fit actually
+consumes, rather than at its reported tilt angle:
+
+```bash
+TestApp inspect-align --runs "D:\Autofocus Bank\Panos\attempt01" --params default \
+  --sensor-diagnostics "C:\temp\sensor" --sensor-diagnostics-label panos_after
+```
+
+Writes `<label>_stars.csv` (one row per registered star, its sweep fit and how it entered the data-point list),
+`<label>_points.csv` (the paraboloid's `x_um, y_um, z_um, sigma_um, predicted, residual, enabled`) and
+`<label>_iterations.csv` (the winsorized solve's trajectory). Purely observational — the fit is bit-identical
+with the seam on. This is what settled whether a change had moved the recovered tilt or only the harness.
+
+## Pin `--settings` on EVERY arm of a comparison
+
+`HarnessSettingsStore` falls back to a DEFAULT PATH when `--settings` is absent, and that path resolves per
+machine and **per binary directory**. Two arms of a before/after run launched from two build outputs therefore
+read two different files, silently, each printing a plausible `Settings: <path>` banner. It cost a whole
+`bank-verify` before/after pair here: the before arm read a 68-key bag exported from profile `astrodet`, the
+after arm a 44-key bag from `Default`, and the two reports also recorded different `profileId`s. The visible
+symptom was a "uniform 4x" change in the sensor model that did not exist.
+
+- **Always pass `--settings <one file>` to every arm**, and check the `Settings:` banner and `profileId` agree.
+- `bank-verify` records `settingsPath`, `settingsPinned` and the profile in its JSON and report header, prints a
+  comparability line, and warns on stderr when `--settings` was omitted. **Two reports are comparable only when
+  those lines match.**
+- `fitInputs` is NOT sufficient: it carries four AF-fit values that can agree across two different files.
+
+## Plugin settings export -> harness option bag (`convert-settings`)
+
+**The trap this exists for.** A harness `--settings` file is `{ Options: { "PSFResolution": "20", ... } }` —
+a flat bag of plugin option keys. The plugin's own settings EXPORT (the file the Star Detection options page
+and the per-filter store write, `fileType: HocusFocusStarDetectionSettings`) nests typed values under
+`starDetection`. Newtonsoft deserializes an export into the harness shape **without complaining** and yields
+an EMPTY bag, so the run silently uses stock defaults while appearing to honour the file. On the frame in
+`docs/saturated-star-fwhm-investigation-results.md` that was the difference between 1737 and 1615 detections.
+
+```bash
+TestApp convert-settings --import "C:\path\O_settings.json" --out "C:\temp\harness_O.json" \
+  [--set PSFResolution=20] [--set UsePSFAbsoluteDeviation=True]
+```
+
+Goes through `StarDetectionOptions.ApplyImportedSnapshot` (the Import button's own path), so the key mapping
+cannot drift. `--set` overrides a key in the produced bag, which is how one arm of a comparison pins a single
+knob. It prints the keys that matter most so you can eyeball the result.
+
+**Only keys that DIFFER from a freshly constructed `StarDetectionOptions` are written** (the accessor records
+a key when its setter fires). Absent keys fall back to the build's own default — so when you produce a file
+with one build and read it with another whose defaults differ, spell the affected keys out with `--set`.
+
+## PSF modelling across the AF bank (`psf-bank`)
+
+One nearest-focus frame per bank run, detected with `ModelPSF` forced on, at the SHIPPED defaults
+(`BuildDefaultStarDetectorParams`) rather than a user's saved options — the question it answers is what a
+default install produces.
+
+```bash
+# 1. pick the frames once and pin them, so a before/after pair scores the identical frames
+TestApp psf-bank --runs "D:\Autofocus Bank" --out "C:\temp\psf" --select
+# 2. measure
+TestApp psf-bank --runs "D:\Autofocus Bank" --out "C:\temp\psf" --manifest "C:\temp\psf\psf_bank_manifest.json" --label after
+```
+
+- **`--select`** detects EVERY frame of every run with `ModelPSF=false` and writes `psf_bank_manifest.json`
+  naming the lowest-median-HFR frame per run. Pin it: the change under test usually MOVES HFR, so re-selecting
+  per arm would compare different frames.
+- **`psf_bank_<label>.csv`** (one row per run): detected, PSF accepted, `PSFFitFailed`, saturated, HFR
+  median/MAD, FWHM median/MAD/p05/p95/max (px and arcsec), eccentricity, R^2, `scatterSD`, and the timings.
+- **`scatterSD`** is the residual SD of per-star FWHM about a least-squares quadratic surface in (x, y) — the
+  measurement-noise term with the field's optical structure removed. It is the metric Part 3 of the saturated-star
+  investigation is scored on.
+- **Timing:** each frame is detected three times — a warm-up, then `ModelPSF=false`, then on — and `psfMs` is
+  the difference. `PSFResolution` squares the sample count per star, so this is a real number to watch.
 
 ## Star Detection Optimizer harnesses (`optimize` / `review` / `diagnose-labels`)
 
@@ -178,7 +263,9 @@ dir (or each per-run subfolder).
 >
 > Since wave 11 the harness reads the fit inputs from the **pinned settings file**, and every landing records
 > `ProfileId` **and** `FitInputs` (`MaxOutlierRejections=…;OutlierRejectionConfidence=…;…` — values, not a hash,
-> so a reader sees *which* one moved). Since wave 12 **every** harness runner does — `bank-verify`,
+> so a reader sees *which* one moved). **`FitInputs` matching is NOT proof of comparability**: it is four values,
+> and two genuinely different settings files can agree on all four. Check `ProfileId` and the settings path too
+> — see "Pin `--settings` on EVERY arm of a comparison" above. Since wave 12 **every** harness runner does — `bank-verify`,
 > `synth-validate`, `inspect-align` and `tilt` build their fit through
 > `HarnessSettingsStore.BuildFitOptions`, print `FitInputs`, and a unit test fails the build if any `TestApp`
 > source constructs `AutoFocusOptions` from the profile again.

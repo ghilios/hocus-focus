@@ -1,4 +1,4 @@
-#region "copyright"
+﻿#region "copyright"
 
 /*
     Copyright © 2021 - 2026 George Hilios <ghilios+NINA@googlemail.com>
@@ -36,7 +36,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Tests.StarDetection {
             public Mat LastMeasurementImage;
             public int RunCount;
 
-            public bool TryRunEarlySpan(Mat srcImage, StarDetectorParams p, int effectiveStructureLayers, bool hotpixelAlreadyApplied, CancellationToken token, out EarlySpanOutput output) {
+            public bool TryRunEarlySpan(Mat srcImage, StarDetectorParams p, int effectiveStructureLayers, bool hotpixelAlreadyApplied, Mat structureSource, CancellationToken token, out EarlySpanOutput output) {
                 RunCount++;
                 // An all-zero structure map yields no candidates, so the late stage completes trivially; the
                 // measurement clone stands in for the GPU-prepared (hotpixel-filtered) image.

@@ -467,11 +467,17 @@ namespace NINA.Joko.Plugins.HocusFocus.Interfaces {
         // and outlier pixels
         public bool UsePSFAbsoluteDeviation { get; set; } = false;
 
+        // Repair only ISOLATED hot pixels on the measurement image instead of running the structure path's 3x3
+        // median over it (StarDetector.PrepareMeasurementAndStructureSources). Defaults FALSE so a params bundle
+        // constructed directly behaves exactly as it did before this option existed; production sets it from
+        // StarDetectionOptions.MeasurementHotpixelRepair.
+        public bool MeasurementHotpixelRepair { get; set; } = false;
+
         // If PSF modeling is enabled, any R^2 values below this threshold will be rejected
         public double PSFGoodnessOfFitThreshold { get; set; } = 0.9;
 
         // The number of pixels of the width of a nominal square to sample star bounding boxes for the purposes of PSF model fitting
-        public int PSFResolution { get; set; } = 10;
+        public int PSFResolution { get; set; } = 20;
 
         // Enables parallel processing of PSF modeling by partitioning the detected stars into batches of this size
         // Set <= 0 to disable parallelism
@@ -826,6 +832,16 @@ namespace NINA.Joko.Plugins.HocusFocus.Interfaces {
         public long HotpixelCount { get; set; } = 0L;
 
         /// <summary>
+        /// Isolated hot pixels repaired on the MEASUREMENT image (the image HFR and the PSF model are measured
+        /// from), as opposed to <see cref="HotpixelCount"/>, which counts what the structure/detection path's
+        /// median filter rewrote. The two paths run different filters by design: the structure path keeps its
+        /// unconditional (or thresholded) 3x3 median, while the measurement path only repairs pixels that pass an
+        /// isolation test, so star cores keep their peaks.
+        /// See docs/saturated-star-fwhm-investigation-results.md Part 4.
+        /// </summary>
+        public long MeasurementHotpixelCount { get; set; } = 0L;
+
+        /// <summary>
         /// Folds <paramref name="other"/> into this instance: SUMs all scalar counters and CONCATENATEs every
         /// <c>*Bounds</c> list. Used to combine the per-thread metrics produced by the parallel star-evaluation
         /// stage back into the run's main metrics. Counters that the parallel stage never touches (e.g.
@@ -866,6 +882,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Interfaces {
             OutsideROI += other.OutsideROI;
             SaturatedPixelCount += other.SaturatedPixelCount;
             HotpixelCount += other.HotpixelCount;
+            MeasurementHotpixelCount += other.MeasurementHotpixelCount;
 
             var thisBounds = AllBoundsLists();
             var otherBounds = other.AllBoundsLists();

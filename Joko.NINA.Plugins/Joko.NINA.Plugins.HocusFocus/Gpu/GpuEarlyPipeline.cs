@@ -1,4 +1,4 @@
-#region "copyright"
+﻿#region "copyright"
 
 /*
     Copyright © 2021 - 2026 George Hilios <ghilios+NINA@googlemail.com>
@@ -62,12 +62,13 @@ namespace NINA.Joko.Plugins.HocusFocus.Gpu {
             acc = accelerator;
         }
 
-        public bool TryRunEarlySpan(Mat srcImage, StarDetectorParams p, int effectiveStructureLayers, bool hotpixelAlreadyApplied, CancellationToken token, out EarlySpanOutput output) {
+        public bool TryRunEarlySpan(Mat srcImage, StarDetectorParams p, int effectiveStructureLayers, bool hotpixelAlreadyApplied, Mat structureSource, CancellationToken token, out EarlySpanOutput output) {
             output = null;
             if (LatchedOff) {
                 return false;
             }
-            if (srcImage.Type() != MatType.CV_32F || !srcImage.IsContinuous()) {
+            if (srcImage.Type() != MatType.CV_32F || !srcImage.IsContinuous()
+                || (structureSource != null && (structureSource.Type() != MatType.CV_32F || !structureSource.IsContinuous()))) {
                 // A decline, not a device failure: it must not latch the GPU off or read as "repeated failures".
                 Interlocked.Increment(ref declines);
                 return false;
@@ -85,13 +86,14 @@ namespace NINA.Joko.Plugins.HocusFocus.Gpu {
                     HotpixelThreshold = p.HotpixelThreshold,
                     NoiseReductionRadius = p.NoiseReductionRadius,
                     StarMeasurementNoiseReductionEnabled = p.StarMeasurementNoiseReductionEnabled,
+                    MeasurementHotpixelRepair = p.MeasurementHotpixelRepair,
                     NoiseClippingMultiplier = p.NoiseClippingMultiplier,
                     EffectiveStructureLayers = effectiveStructureLayers,
                     StructureLayers = p.StructureLayers,
                     LocallyAdaptiveBinarization = p.LocallyAdaptiveBinarization,
                     AdaptiveNoiseBlockSize = p.AdaptiveNoiseBlockSize,
                 };
-                var result = chain.Run(srcImage, gpuParams, hotpixelAlreadyApplied);
+                var result = chain.Run(srcImage, gpuParams, hotpixelAlreadyApplied, structureSource);
                 output = new EarlySpanOutput {
                     StructureMap = result.StructureMap,
                     MeasurementImage = result.MeasurementImage,
@@ -101,6 +103,8 @@ namespace NINA.Joko.Plugins.HocusFocus.Gpu {
                     AdaptiveMedianGrid = result.AdaptiveMedianGrid,
                     StructureMapMedian = result.StructureMapMedian,
                     HotpixelCount = result.HotpixelCount,
+                    MeasurementHotpixelCount = result.MeasurementHotpixelCount,
+                    MeasurementDiffersFromStructure = result.MeasurementDiffersFromStructure,
                 };
                 // Ownership of the Mats moved to the output; don't dispose them with the result wrapper.
                 result.StructureMap = null;

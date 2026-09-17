@@ -47,7 +47,11 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection {
         // no same-row gap-jump merging — measurably better J on every bank run tested (see
         // docs/gpu-star-detection-optimization-results.md §6). The legacy walker remains reachable
         // (UseConnectedComponentCollection=false) and bit-identical to v2 collection.
-        public const int StarDetectorVersion = 3;
+        // v4: the measurement image (what HFR and the PSF model are measured from) is repaired with an isolation
+        // test instead of the 3x3 median the structure/detection path still takes, and saturated stars get no PSF
+        // fit at all. Both change measured output, so every cached detection result from v3 must miss.
+        // See docs/saturated-star-fwhm-investigation-results.md.
+        public const int StarDetectorVersion = 4;
 
         private readonly IAlglibAPI alglibAPI;
 
@@ -411,6 +415,7 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection {
             // Early-only metric counters captured here so GateAndMeasure can seed a fresh metrics with them. These
             // are produced by the early pipeline (hotpixel filter) and the candidate flood-fill / global scan.
             internal long HotpixelCount;
+            internal long MeasurementHotpixelCount;
             internal int StructureCandidates;
             internal long SaturatedPixelCount;
 
@@ -497,6 +502,12 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection {
             Mat liveOwnedImage = ownsLocalTracker ? srcImage : null;
             var contextProduced = false;
 
+            // Set once the measurement image and the structure source stop being the same pixels — either because
+            // the isolation repair rewrote the measurement image while the structure source took the median, or
+            // because only the structure source gets the noise-reduction Gaussian. It decides whether the
+            // measurement image needs its own K-σ noise estimate (F4 σ-consistency).
+            var measurementDiffersFromStructure = false;
+
             // Replaces srcImage with a freshly-allocated prepared Mat (the ROI crop, the binned resample, or the
             // GPU span's measurement image), disposing the one it replaces. Ownership of the replacement:
             //   - Split path: this method owns it until the context adopts it — held in liveOwnedImage so an
@@ -545,10 +556,29 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection {
                     // a single-pixel outlier at a recognizable amplitude, so it has to die at native resolution.
                     // Step 1 below is then told it has already run. (Bayered frames already get their CFA hotpixel
                     // pass at native resolution in PrepareSrcImageFromRenderedImage, so both paths agree.)
+                    //
+                    // The measurement/structure split (see PrepareMeasurementAndStructureSources) also has to
+                    // happen at native resolution here, so the binned STRUCTURE source is produced now and carried
+                    // into step 1 as prebinnedStructureSource.
                     var binning = Math.Max(1, p.DetectionBinning);
+                    Mat prebinnedStructureSource = null;
                     if (binning > 1) {
                         if (!hotpixelFilterAlreadyApplied && (p.HotpixelFiltering || (p.NoiseReductionRadius > 0 && p.StarMeasurementNoiseReductionEnabled))) {
-                            metrics.HotpixelCount = ApplyHotpixelFilter(srcImage, p);
+                            if (p.MeasurementHotpixelRepair) {
+                                using (var nativeStructureSource = srcImage.Clone()) {
+                                    metrics.HotpixelCount = ApplyHotpixelFilter(nativeStructureSource, p);
+                                    // Tracked the moment it exists: the isolation repair and the measurement bin
+                                    // below both allocate a full native-resolution frame, and an OOM out of either
+                                    // would otherwise orphan this Mat — it belongs to neither tracker until then,
+                                    // and it is not liveOwnedImage, so the finally could not free it.
+                                    prebinnedStructureSource = scratch.T(CvImageUtility.BinMean(nativeStructureSource, binning));
+                                }
+                                metrics.MeasurementHotpixelCount = HotpixelFiltering.RepairIsolatedHotpixels(srcImage);
+                                measurementDiffersFromStructure = true;
+                            } else {
+                                // Legacy: one filtered image feeds both paths, exactly as before this option.
+                                metrics.HotpixelCount = ApplyHotpixelFilter(srcImage, p);
+                            }
                             hotpixelFilterAlreadyApplied = true;
                         }
 
@@ -589,7 +619,7 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection {
                         ? EarlyAcceleratorOverride ?? Gpu.GpuAccelerationHost.TryGetForBuild()
                         : null;
                     if (earlyAccelerator != null) {
-                        earlyAccelerator.TryRunEarlySpan(srcImage, p, effectiveStructureLayers, hotpixelFilterAlreadyApplied, token, out acceleratedSpan);
+                        earlyAccelerator.TryRunEarlySpan(srcImage, p, effectiveStructureLayers, hotpixelFilterAlreadyApplied, prebinnedStructureSource, token, out acceleratedSpan);
                     }
                     if (acceleratedSpan != null) {
                         if (acceleratedSpan.MeasurementImage != null) {
@@ -598,7 +628,13 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection {
                             AdoptPreparedImage(acceleratedSpan.MeasurementImage);
                         }
                         structureMap = scratch.T(acceleratedSpan.StructureMap);
-                        metrics.HotpixelCount = acceleratedSpan.HotpixelCount;
+                        // When the binning hoist supplied the structure source, it already ran BOTH filters at
+                        // native resolution and counted them; the span skips them and would report 0 for each.
+                        if (prebinnedStructureSource == null) {
+                            metrics.HotpixelCount = acceleratedSpan.HotpixelCount;
+                            metrics.MeasurementHotpixelCount = acceleratedSpan.MeasurementHotpixelCount;
+                        }
+                        measurementDiffersFromStructure |= acceleratedSpan.MeasurementDiffersFromStructure;
                         noiseReducedImageNoise = acceleratedSpan.StructureNoise;
                         measurementImageNoise = acceleratedSpan.MeasurementNoise;
                         binarizeSigmaGrid = acceleratedSpan.SigmaGrid;
@@ -606,42 +642,39 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection {
                         structureMapMedian = acceleratedSpan.StructureMapMedian;
                         stopWatch.RecordEntry("GpuEarlySpan");
                     } else {
-                        var hotpixelFilteringApplied = hotpixelFilterAlreadyApplied;
-
-                        // Also apply hotpixel filtering if noise reduction will be done to the source image
-                        if (p.HotpixelFiltering || (p.NoiseReductionRadius > 0 && p.StarMeasurementNoiseReductionEnabled)) {
-                            // Apply a median box filter in place to the starting image
-                            if (!hotpixelFilterAlreadyApplied) {
-                                metrics.HotpixelCount = ApplyHotpixelFilter(srcImage, p);
+                        // Steps 1-3: split the raw pixels into the MEASUREMENT image (srcImage, what HFR and the
+                        // PSF model are measured from) and the STRUCTURE source (noiseReducedImage, what candidate
+                        // detection is built from). They get DIFFERENT hotpixel treatment on purpose — see
+                        // PrepareMeasurementAndStructureSources.
+                        Mat noiseReducedImage;
+                        if (prebinnedStructureSource != null) {
+                            // The binning hoist already produced the structure source at native resolution and
+                            // binned it; the measurement image was repaired and binned alongside it.
+                            noiseReducedImage = prebinnedStructureSource;
+                            if (p.NoiseReductionRadius > 0 && p.StarMeasurementNoiseReductionEnabled) {
+                                CvImageUtility.ConvolveGaussian(srcImage, srcImage, p.NoiseReductionRadius * 2 + 1);
                             }
-                            hotpixelFilteringApplied = true;
+                            if (p.NoiseReductionRadius > 0) {
+                                CvImageUtility.ConvolveGaussian(noiseReducedImage, noiseReducedImage, p.NoiseReductionRadius * 2 + 1);
+                                if (!p.StarMeasurementNoiseReductionEnabled) {
+                                    measurementDiffersFromStructure = true;
+                                }
+                            }
+                            MaybeSaveIntermediateImage(srcImage, p, "02-src-image-preparation.tif");
+                            stopWatch.RecordEntry("SrcImagePreparation");
+                            progress?.Report(new ApplicationStatus() { Status = "Preparing for Structure Detection" });
+                        } else {
+                            noiseReducedImage = scratch.NewMat();
+                            var counts = PrepareMeasurementAndStructureSources(srcImage, noiseReducedImage, p, hotpixelFilterAlreadyApplied, ref measurementDiffersFromStructure);
+                            if (counts.StructureHotpixels.HasValue) {
+                                metrics.HotpixelCount = counts.StructureHotpixels.Value;
+                            }
+                            metrics.MeasurementHotpixelCount = counts.MeasurementHotpixels;
+
+                            MaybeSaveIntermediateImage(srcImage, p, "02-src-image-preparation.tif");
+                            stopWatch.RecordEntry("SrcImagePreparation");
+                            progress?.Report(new ApplicationStatus() { Status = "Preparing for Structure Detection" });
                         }
-
-                        var noiseReductionApplied = false;
-                        if (p.NoiseReductionRadius > 0 && p.StarMeasurementNoiseReductionEnabled) {
-                            CvImageUtility.ConvolveGaussian(srcImage, srcImage, p.NoiseReductionRadius * 2 + 1);
-                            noiseReductionApplied = true;
-                        }
-
-                        MaybeSaveIntermediateImage(srcImage, p, "02-src-image-preparation.tif");
-                        stopWatch.RecordEntry("SrcImagePreparation");
-
-                    // Step 2: Prepare for structure detection by performing optional noise reduction
-                    progress?.Report(new ApplicationStatus() { Status = "Preparing for Structure Detection" });
-
-                    Mat noiseReducedImage = scratch.NewMat();
-                    if (hotpixelFilteringApplied || noiseReductionApplied || p.NoiseReductionRadius <= 0) {
-                        // In this case, we've already applied hotpixel filtering, so no need to do it again. The structure map can start from here
-                        srcImage.CopyTo(noiseReducedImage);
-                    } else {
-                        srcImage.CopyTo(noiseReducedImage);
-                        metrics.HotpixelCount = ApplyHotpixelFilter(noiseReducedImage, p);
-                    }
-
-                    // Step 3: If we haven't yet applied noise reduction and it is configured, do so now
-                    if (p.NoiseReductionRadius > 0 && !noiseReductionApplied) {
-                        CvImageUtility.ConvolveGaussian(noiseReducedImage, noiseReducedImage, p.NoiseReductionRadius * 2 + 1);
-                    }
 
                     structureMap = scratch.NewMat();
                     noiseReducedImage.CopyTo(structureMap);
@@ -665,13 +698,12 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection {
                     });
 
                     // F4 (σ consistency): thresholds applied to the image actually sampled must use that image's σ.
-                    // The estimate above is computed on the (possibly blurred) structure-map source; when a noise
-                    // reduction radius is set but measurement noise reduction is off, srcImage was never blurred and
-                    // its white-noise σ is ~4x larger. Measure it directly on srcImage (rather than applying an
-                    // analytic kernel factor) so correlated real-camera noise and hotpixel filtering are accounted
+                    // The estimate above is computed on the structure source, which is a different image whenever
+                    // it took the median hotpixel filter the measurement image did not, or a noise-reduction
+                    // Gaussian the measurement image did not. Measure σ directly on srcImage (rather than applying
+                    // an analytic kernel factor) so correlated real-camera noise and hotpixel repair are accounted
                     // for automatically. srcImage is read-only from here until this task is awaited (before binarization), so the concurrent read is safe.
-                    var measurementImageDiffers = p.NoiseReductionRadius > 0 && !noiseReductionApplied;
-                    var measurementNoiseEstimateTask = measurementImageDiffers
+                    var measurementNoiseEstimateTask = measurementDiffersFromStructure
                         ? Task.Run(() => {
                             var result = CvImageUtility.KappaSigmaNoiseEstimate(srcImage, clippingMultipler: p.NoiseClippingMultiplier);
                             var ksigmaTraceMeasurement = $"Measurement Image K-Sigma Noise Estimate: {result.Sigma}, Background Mean: {result.BackgroundMean}, NumIterations={result.NumIterations}";
@@ -824,6 +856,7 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection {
                         RoiRect = roiRect,
                         DebugData = debugData,
                         HotpixelCount = metrics.HotpixelCount,
+                        MeasurementHotpixelCount = metrics.MeasurementHotpixelCount,
                         StructureCandidates = metrics.StructureCandidates,
                         SaturatedPixelCount = metrics.SaturatedPixelCount
                     };
@@ -861,6 +894,7 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection {
                 // the CFA count, exactly as the monolithic Detect(IRenderedImage) did; otherwise the early
                 // structure-pipeline count is authoritative.
                 HotpixelCount = ctx.DebayerHotpixelCount ?? ctx.HotpixelCount,
+                MeasurementHotpixelCount = ctx.MeasurementHotpixelCount,
                 StructureCandidates = ctx.StructureCandidates,
                 SaturatedPixelCount = ctx.SaturatedPixelCount
             };
@@ -982,6 +1016,116 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection {
             }
         }
 
+        /// <summary>
+        /// Pixel counts rewritten by the two hotpixel paths. <see cref="StructureHotpixels"/> is null when the
+        /// structure path did not run a filter at all, so the caller leaves the existing metric untouched.
+        /// </summary>
+        private readonly struct HotpixelRepairCounts {
+
+            public HotpixelRepairCounts(long? structureHotpixels, long measurementHotpixels) {
+                StructureHotpixels = structureHotpixels;
+                MeasurementHotpixels = measurementHotpixels;
+            }
+
+            public long? StructureHotpixels { get; }
+            public long MeasurementHotpixels { get; }
+        }
+
+        /// <summary>
+        /// Steps 1-3 of the early pipeline: derives the MEASUREMENT image and the STRUCTURE source from the same
+        /// raw pixels, giving each the hotpixel treatment it actually needs.
+        ///
+        /// <list type="bullet">
+        ///   <item><b>Structure source</b> (<paramref name="structureSource"/>, a copy of the raw input) keeps the
+        ///   unconditional — or thresholded — 3x3 median it has always had. Candidate formation needs that
+        ///   smoothing: running detection on an unsmoothed frame loses a quarter of the detections.</item>
+        ///   <item><b>Measurement image</b> (<paramref name="measurementImage"/>, mutated in place) gets the
+        ///   isolation repair instead. The median is a poor filter for the image HFR and the PSF are measured
+        ///   from: it drops a bright star's peak ~20%, widens its half-max width, and biases every fitted FWHM
+        ///   ~6% high while flattening a third of the sensor's real focus gradient. The thresholded variant is no
+        ///   better — a star core deviates from its own 3x3 median exactly as a hot pixel does, so it rewrites
+        ///   star cores too. See docs/saturated-star-fwhm-investigation-results.md Part 4.</item>
+        /// </list>
+        ///
+        /// <para>The noise-reduction Gaussian follows the same split: the structure source always takes it when a
+        /// radius is configured, the measurement image only when StarMeasurementNoiseReductionEnabled is set. With
+        /// that option ON the Gaussian therefore runs once per image rather than once in total (the images are no
+        /// longer copies of each other, so one blur cannot serve both). Values are unchanged; the cost is not.</para>
+        ///
+        /// <para>When <paramref name="hotpixelFilterAlreadyApplied"/> is set — the bayered CFA path, which filters
+        /// the raw sensor data before debayering — neither path filters again, exactly as before.</para>
+        /// </summary>
+        private HotpixelRepairCounts PrepareMeasurementAndStructureSources(
+            Mat measurementImage,
+            Mat structureSource,
+            StarDetectorParams p,
+            bool hotpixelFilterAlreadyApplied,
+            ref bool measurementDiffersFromStructure) {
+            long? structureHotpixels = null;
+            long measurementHotpixels = 0L;
+            var hotpixelFilteringApplied = hotpixelFilterAlreadyApplied;
+            var noiseReductionApplied = false;
+
+            if (!p.MeasurementHotpixelRepair) {
+                // LEGACY PATH, bit-identical to the pipeline before this option existed: the median is applied in
+                // place to the measurement image and the structure source is a copy of the RESULT.
+                if (p.HotpixelFiltering || (p.NoiseReductionRadius > 0 && p.StarMeasurementNoiseReductionEnabled)) {
+                    if (!hotpixelFilterAlreadyApplied) {
+                        structureHotpixels = ApplyHotpixelFilter(measurementImage, p);
+                    }
+                    hotpixelFilteringApplied = true;
+                }
+                if (p.NoiseReductionRadius > 0 && p.StarMeasurementNoiseReductionEnabled) {
+                    CvImageUtility.ConvolveGaussian(measurementImage, measurementImage, p.NoiseReductionRadius * 2 + 1);
+                    noiseReductionApplied = true;
+                }
+                measurementImage.CopyTo(structureSource);
+                if (!hotpixelFilteringApplied && !noiseReductionApplied && p.NoiseReductionRadius > 0) {
+                    structureHotpixels = ApplyHotpixelFilter(structureSource, p);
+                }
+                if (p.NoiseReductionRadius > 0 && !noiseReductionApplied) {
+                    CvImageUtility.ConvolveGaussian(structureSource, structureSource, p.NoiseReductionRadius * 2 + 1);
+                    measurementDiffersFromStructure = true;
+                }
+                return new HotpixelRepairCounts(structureHotpixels, measurementHotpixels);
+            }
+
+            // The structure source starts from the RAW pixels, before the measurement image is repaired, so its
+            // median filter sees exactly the input it saw before the split existed.
+            measurementImage.CopyTo(structureSource);
+
+            // Hotpixel filtering also runs when noise reduction will be applied to the measurement image.
+            if (p.HotpixelFiltering || (p.NoiseReductionRadius > 0 && p.StarMeasurementNoiseReductionEnabled)) {
+                if (!hotpixelFilterAlreadyApplied) {
+                    structureHotpixels = ApplyHotpixelFilter(structureSource, p);
+                    measurementHotpixels = HotpixelFiltering.RepairIsolatedHotpixels(measurementImage);
+                    measurementDiffersFromStructure = true;
+                }
+                hotpixelFilteringApplied = true;
+            }
+
+            if (p.NoiseReductionRadius > 0 && p.StarMeasurementNoiseReductionEnabled) {
+                CvImageUtility.ConvolveGaussian(measurementImage, measurementImage, p.NoiseReductionRadius * 2 + 1);
+                noiseReductionApplied = true;
+            }
+
+            // The structure source still needs its own hotpixel pass when the measurement image skipped one
+            // entirely (hotpixel filtering off, but a noise-reduction radius configured).
+            if (!hotpixelFilteringApplied && p.NoiseReductionRadius > 0) {
+                structureHotpixels = ApplyHotpixelFilter(structureSource, p);
+                measurementDiffersFromStructure = true;
+            }
+
+            if (p.NoiseReductionRadius > 0) {
+                CvImageUtility.ConvolveGaussian(structureSource, structureSource, p.NoiseReductionRadius * 2 + 1);
+                if (!noiseReductionApplied) {
+                    measurementDiffersFromStructure = true;
+                }
+            }
+
+            return new HotpixelRepairCounts(structureHotpixels, measurementHotpixels);
+        }
+
         private long ApplyHotpixelFilter(Mat img, StarDetectorParams p) {
             if (p.HotpixelThresholdingEnabled) {
                 return HotpixelFiltering.HotpixelFilterWithThresholding(img, p.HotpixelThreshold);
@@ -999,6 +1143,20 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection {
                 var psfPartitionTask = Task.Run(() => {
                     foreach (var detectedStar in detectedStarsPartition) {
                         ct.ThrowIfCancellationRequested();
+
+                        // Saturated stars get NO PSF fit. Their clipped core is masked out of the sample set, so
+                        // the fit sees wings only and the width is not identifiable from them: the solver runs its
+                        // amplitude into the upper bound and the width absorbs the rest. On the investigated frame
+                        // the five saturated stars were biased between -15% and +54% against their unsaturated
+                        // neighbours, the sign depending on how much of the core survived, and neither the R^2 gate
+                        // nor a reduced-chi^2 gate separates them. Leaving PSF null keeps them out of the frame's
+                        // FWHM / Sigma / Eccentricity medians; every consumer already handles a null PSF, and
+                        // metrics.Saturated already counts these stars. This is the same test that drives
+                        // metrics.SaturatedBounds and StarsForHfrAggregation.
+                        // See docs/saturated-star-fwhm-investigation-results.md Part 1.
+                        if ((detectedStar.Background + detectedStar.PeakBrightness) >= p.SaturationThreshold) {
+                            continue;
+                        }
 
                         var modeler = PSFModeler.Create(
                             alglibAPI: alglibAPI,

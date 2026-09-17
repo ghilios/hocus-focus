@@ -42,11 +42,13 @@ reported in full-frame pixels.
 ### 2. Hot-pixel filtering
 
 Single bright pixels (cosmic rays, sensor defects) look like tiny, intensely peaked stars and would survive
-most gates. A 3×3 median replaces a hot pixel with the median of its neighbors while leaving genuine stars
-(which span many pixels) essentially untouched. With **Use Hotpixel Thresholding** enabled, only pixels that
-exceed their surroundings by the configured threshold are corrected, so real star cores are preserved. For
-bayered images the filter runs on the raw CFA before debayering. See
-[Hot Pixels & Saturation](../settings/hotpixel-saturation.md).
+most gates. The frame splits here into two images. The **structure image**, where candidates are found, takes a
+3×3 median, restricted to pixels that exceed their surroundings by the configured threshold when **Use Hotpixel
+Thresholding** is enabled. The **measurement image**, where HFR and the PSF are measured, takes the same median
+unless **Measurement Hotpixel Repair** is on, in which case a pixel is rewritten only when it stands well above
+the local background while its neighbors do not, which is true of a hot pixel and false of a star core. Running
+a median there softens every star and biases the measurements it feeds. For bayered images the filter runs on
+the raw CFA before debayering. See [Hot Pixels & Saturation](../settings/hotpixel-saturation.md).
 
 !!! note
     Hot-pixel filtering also runs automatically whenever measurement noise reduction is enabled, because the

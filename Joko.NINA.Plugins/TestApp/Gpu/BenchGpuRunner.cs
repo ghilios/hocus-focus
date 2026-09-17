@@ -1,4 +1,4 @@
-#region "copyright"
+﻿#region "copyright"
 
 /*
     Copyright © 2021 - 2026 George Hilios <ghilios+NINA@googlemail.com>
@@ -70,6 +70,9 @@ namespace TestApp.Gpu {
             StructureLayers = layers,
             LocallyAdaptiveBinarization = true,
             AdaptiveNoiseBlockSize = 128,
+            // The bench exists to compare the two implementations of the CURRENT pipeline, so exercise the
+            // measurement/structure split rather than the legacy single-image path.
+            MeasurementHotpixelRepair = true,
         };
 
         private static async Task RunEarly(string[] args, bool compare) {
@@ -187,6 +190,13 @@ namespace TestApp.Gpu {
             Console.WriteLine();
             Console.WriteLine("== divergence: GPU vs CPU oracle ==");
             Console.WriteLine($"hotpixel count: cpu={cpu.HotpixelCount} gpu={gpu.HotpixelCount} {(cpu.HotpixelCount == gpu.HotpixelCount ? "EXACT" : "DIFF")}");
+            // The measurement path's isolation repair. A zero on BOTH sides means the repair never ran, which
+            // makes the measurement-image diff below vacuous rather than reassuring.
+            Console.WriteLine($"measurement hotpixel repairs: cpu={cpu.MeasurementHotpixelCount} gpu={gpu.MeasurementHotpixelCount} " +
+                              $"{(cpu.MeasurementHotpixelCount == gpu.MeasurementHotpixelCount ? "EXACT" : "DIFF")}" +
+                              $"{(cpu.MeasurementHotpixelCount == 0 && gpu.MeasurementHotpixelCount == 0 ? "  (repair did not run -- the measurement diff below proves nothing)" : string.Empty)}");
+            Console.WriteLine($"measurement differs from structure: cpu={cpu.MeasurementDiffersFromStructure} gpu={gpu.MeasurementDiffersFromStructure} " +
+                              $"{(cpu.MeasurementDiffersFromStructure == gpu.MeasurementDiffersFromStructure ? "EXACT" : "DIFF")}");
             Console.WriteLine($"K-sigma structure: sigma rel-delta={RelDelta(cpu.StructureNoise.Sigma, gpu.StructureNoise.Sigma):E2}, " +
                               $"mean rel-delta={RelDelta(cpu.StructureNoise.BackgroundMean, gpu.StructureNoise.BackgroundMean):E2}, " +
                               $"iters cpu={cpu.StructureNoise.NumIterations} gpu={gpu.StructureNoise.NumIterations}");

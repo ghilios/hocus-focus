@@ -2,9 +2,9 @@
 
 After a star is detected and its HFR measured, Hocus Focus can fit an analytic **Point Spread Function (PSF)** to the star's pixels. The PSF fit is what produces a star's **FWHM** (full width at half maximum) and **eccentricity**; without it those metrics are unavailable. This page covers the settings that control whether PSF fitting runs, which model is used, how finely it samples, and the goodness-of-fit gate that decides whether a fit is trusted.
 
-![The PSF modeling settings (type, resolution, parallel size, fit threshold) highlighted in the advanced list](../assets/screenshots/advanced-psf-modeling.png){ width=375 }
+![The PSF modeling settings highlighted in the advanced list: Fit PSF, PSF Type, PSF Resolution, PSF Fit Threshold, PSF Pixel Integration and PSF MAD Fitting](../assets/screenshots/advanced-psf-modeling.png){ width=375 }
 
-*The PSF modeling block: model type, resolution, parallel batch size, and fit threshold.*
+*Where the PSF settings live in the advanced list. This capture predates the current default for PSF Resolution, which now ships as 20.*
 
 These settings live under the **Advanced** star-detection options. They do not affect star *acceptance* (which stars pass the [acceptance gates](acceptance-gates.md)). They only affect the per-star *shape measurement* that PSF fitting produces.
 
@@ -18,10 +18,10 @@ Star detection first finds candidates, measures each star's centroid and **HFR**
 |---|---|---|---|
 | Fit PSF | On | On / Off | Master switch for fitting PSFs; required for FWHM and eccentricity |
 | PSF Type | Moffat 4.0 | Gaussian, Moffat 4.0 / 2.5 / 1.5, Moffat (β fittable) | Which analytic profile is fit to each star |
-| PSF Resolution | 10 | integer > 0 (pixels) | Sampling-grid width across the star box; accuracy vs. speed |
+| PSF Resolution | 20 | integer > 0 (pixels) | Sampling-grid width across the star box; accuracy vs. speed |
 | PSF Fit Threshold | 0.9 | (0, 1] (R²) | Minimum R² for a fit to be accepted |
 | PSF Pixel Integration | Off | On / Off | Integrate the model over each pixel instead of point-sampling |
-| PSF MAD Fitting | Off | On / Off | Experimental absolute-deviation fit, more robust to noise/outliers |
+| PSF MAD Fitting | Off | On / Off | Absolute-deviation fit, more robust to noise and outlier pixels, and expensive |
 | PSF Parallel Size | 100 | integer ≥ 0 (stars) | Batch size for parallel fitting; 0 disables parallelism |
 
 ![Gaussian versus Moffat PSF images with radial profiles, showing the heavier wings of the Moffat model](../assets/figures/psf-models.png){ width=620 }
@@ -71,14 +71,14 @@ I(r) = I_0 \left( 1 + \frac{r^2}{\alpha^2} \right)^{-\beta}
 
 How finely each star's bounding box is sampled when fitting the model.
 
-> The number of pixels of the width of a nominal square to sample star bounding boxes for the purposes of PSF model fitting. Higher resolution may be more accurate, but takes longer to calculate
+> The number of pixels of the width of a nominal square to sample star bounding boxes for the purposes of PSF model fitting. Higher resolution may be more accurate, but takes longer to calculate. The default of 20 samples a nominal star box about once per pixel
 
-**Default:** 10 (pixels) &nbsp;•&nbsp; **Range:** integer > 0 (the field validates greater-than-zero; the backing property rejects negatives)
+**Default:** 20 (pixels) &nbsp;•&nbsp; **Range:** integer > 0 (the field validates greater-than-zero; the backing property rejects negatives)
 
-Higher resolution gives the solver more samples per star (potentially a more accurate fit) at the cost of compute time per star.
+Higher resolution gives the solver more samples per star (potentially a more accurate fit) at the cost of compute time per star. The sample spacing is the star box's nominal width divided by this number, so 20 samples a typical 20-pixel box about once per pixel, and 10 samples it every other pixel.
 
 !!! tip "When this helps"
-    The default of **10** is a good balance. Raise it if FWHM/eccentricity look noisy on large, well-sampled stars and you can spare the time; lower it to speed up fitting when you have many stars and accuracy is non-critical. It does not change which stars are accepted.
+    Leave it at **20**, which samples a typical star box at its native pixel spacing. Measured across the auto-focus bank it costs about 1.8x the fitting time and takes roughly 6% off the frame-to-frame spread of FWHM, without changing which stars are accepted or any HFR value. Lower it to speed up fitting when you have many stars and shape accuracy is not critical. Values above 20 oversample the pixel grid and buy little.
 
 ## PSF Fit Threshold
 
@@ -111,16 +111,16 @@ Point-sampling the model at \( (i, j) \) ignores how the profile varies across a
 
 ## PSF MAD Fitting
 
-**PSF MAD Fitting** (property `UsePSFAbsoluteDeviation`) is an experimental fitting mode that minimizes absolute deviation instead of squared residuals.
+**PSF MAD Fitting** (property `UsePSFAbsoluteDeviation`) minimizes absolute deviation instead of squared residuals.
 
-> Enables an experimental PSF fitting approach that is more robust to noise and outlier pixels. This should more closely mimic PixInsight PSF fitting logic
+> Fits the PSF by minimizing absolute deviation rather than squared residuals, which is more robust to noise and outlier pixels and more closely mimics PixInsight PSF fitting logic. Off by default because it is expensive: measured across the auto-focus bank it costs roughly 5.6x the PSF fitting time and tightens the FWHM spread by only about 1%, where PSF Resolution 20 costs 1.8x for about 6%
 
 **Default:** Off &nbsp;•&nbsp; **Range:** On / Off
 
-Fitting to minimize absolute deviation downweights outlier pixels (a hot pixel, a cosmic-ray hit, a nearby star's flux) relative to a least-squares fit, at a modest extra computational cost.
+Fitting to minimize absolute deviation downweights outlier pixels (a hot pixel, a cosmic-ray hit, a nearby star's flux) relative to a least-squares fit, at a modest extra computational cost. It is also closer to how PixInsight fits a PSF.
 
 !!! tip "When this helps"
-    Try it on **noisy frames** or fields with frequent outlier pixels where ordinary fits are being pulled around, and when you want behavior closer to PixInsight's PSF logic. Judge it the same way as PSF Pixel Integration above: FWHM/σ stability before and after, plus the **PSF Failed** count. Because it is experimental and slower, **leave it off** by default and enable it deliberately when robustness matters more than speed.
+    Leave it **off** unless you have a specific reason. Measured across the auto-focus bank it costs about 5.6x the PSF fitting time on its own, and on top of PSF Resolution 20 it moves the FWHM spread only from about 6% tighter to about 8%. PSF Resolution 20 is where the value is, at 1.8x. Turn this **on** for noisy frames or fields with frequent outlier pixels where ordinary fits are being pulled around, and when you want behavior closer to PixInsight's, if you can spare the time.
 
 ## PSF Parallel Size
 

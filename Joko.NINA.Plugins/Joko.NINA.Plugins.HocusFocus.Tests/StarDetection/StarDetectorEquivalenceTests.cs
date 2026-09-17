@@ -1,4 +1,4 @@
-using NINA.Joko.Plugins.HocusFocus.Interfaces;
+﻿using NINA.Joko.Plugins.HocusFocus.Interfaces;
 using NUnit.Framework;
 using System;
 using System.Linq;
@@ -96,6 +96,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Tests.StarDetection {
             "OutsideROI=0\r\n" +
             "SaturatedPixelCount=0\r\n" +
             "HotpixelCount=221643\r\n" +
+            "MeasurementHotpixelCount=0\r\n" +
             "RelaxationAdmittedCount=0\r\n" +
             "TooDistortedBounds=[]\r\n" +
             "DegenerateBounds=[]\r\n" +
@@ -148,7 +149,10 @@ namespace NINA.Joko.Plugins.HocusFocus.Tests.StarDetection {
             Assert.That(sig, Is.EqualTo(GoldenSignature),
                 "Detected stars and metrics must exactly match the committed pre-change baseline. " +
                 "If this fails after a parallelization change, the change has altered results — " +
-                "investigate before updating the baseline.");
+                "investigate before updating the baseline. NOTE: StandardParams leaves " +
+                "MeasurementHotpixelRepair OFF, so this baseline is the SAME one that predates that option — " +
+                "which is exactly the guarantee it now also carries: with the option off, detection is " +
+                "bit-identical to the pipeline before it existed.");
         }
 
         /// <summary>

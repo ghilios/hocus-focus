@@ -1,4 +1,4 @@
-#region "copyright"
+﻿#region "copyright"
 
 /*
     Copyright © 2021 - 2026 George Hilios <ghilios+NINA@googlemail.com>
@@ -28,6 +28,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Gpu {
         public double HotpixelThreshold;
         public int NoiseReductionRadius;
         public bool StarMeasurementNoiseReductionEnabled;
+        public bool MeasurementHotpixelRepair;
         public double NoiseClippingMultiplier;
         public int EffectiveStructureLayers;
         public int StructureLayers;
@@ -49,6 +50,18 @@ namespace NINA.Joko.Plugins.HocusFocus.Gpu {
         public CvImageUtility.LocalBackgroundGrid AdaptiveMedianGrid;
         public double StructureMapMedian;
         public long HotpixelCount;
+
+        /// <summary>Isolated hot pixels repaired on the measurement image (StarDetectorMetrics.MeasurementHotpixelCount).</summary>
+        public long MeasurementHotpixelCount;
+
+        /// <summary>
+        /// True when the measurement image and the structure source are no longer the same pixels — the
+        /// measurement image took the isolation repair while the structure source took the median, and/or only
+        /// the structure source took the noise-reduction Gaussian. Mirrors StarDetector's
+        /// measurementDiffersFromStructure and decides whether a separate measurement K-σ estimate was needed.
+        /// </summary>
+        public bool MeasurementDiffersFromStructure;
+
         public Dictionary<string, double> StageMs;
 
         public void Dispose() {
@@ -72,6 +85,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Gpu {
         // Mirrors StarDetector.AdaptiveBinarizationSigmaFloor (private const there).
         private const float AdaptiveBinarizationSigmaFloor = 1e-6f;
 
+
         // Grid-stride thread count for the reduction/histogram kernels: enough blocks to saturate the
         // memory system, few enough that per-thread atomics stay cheap.
         private const int ReductionThreads = 128 * 1024;
@@ -83,6 +97,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Gpu {
         private readonly AcceleratorStream stream;
         private readonly Action<AcceleratorStream, Index1D, ArrayView<float>, ArrayView<float>, int, int> median3x3;
         private readonly Action<AcceleratorStream, Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, float, ArrayView<long>> hotpixelSelect;
+        private readonly Action<AcceleratorStream, Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<long>, int, int, int> isolatedHotpixelRepair;
         private readonly Action<AcceleratorStream, Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int> convolveRow;
         private readonly Action<AcceleratorStream, Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int> convolveCol;
         private readonly Action<AcceleratorStream, Index1D, ArrayView<float>, ArrayView<float>, int, int, int> atrousH;
@@ -112,6 +127,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Gpu {
             stream = acc.CreateStream();
             median3x3 = acc.LoadAutoGroupedKernel<Index1D, ArrayView<float>, ArrayView<float>, int, int>(GpuEarlyKernels.Median3x3Kernel);
             hotpixelSelect = acc.LoadAutoGroupedKernel<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, float, ArrayView<long>>(GpuEarlyKernels.HotpixelSelectKernel);
+            isolatedHotpixelRepair = acc.LoadAutoGroupedKernel<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<long>, int, int, int>(GpuEarlyKernels.IsolatedHotpixelRepairKernel);
             convolveRow = acc.LoadAutoGroupedKernel<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int>(GpuEarlyKernels.ConvolveRowKernel);
             convolveCol = acc.LoadAutoGroupedKernel<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int>(GpuEarlyKernels.ConvolveColKernel);
             atrousH = acc.LoadAutoGroupedKernel<Index1D, ArrayView<float>, ArrayView<float>, int, int, int>(GpuEarlyKernels.AtrousHorizontalKernel);
@@ -150,14 +166,23 @@ namespace NINA.Joko.Plugins.HocusFocus.Gpu {
         /// <summary>
         /// Runs the EARLY span on <paramref name="srcImage"/> (CV_32F, continuous; NOT modified). Mirrors
         /// StarDetector.BuildDetectionContextInternal steps 1-5b exactly, including the branch structure
-        /// around hotpixelAlreadyApplied / noise-reduction placement.
+        /// around hotpixelAlreadyApplied / noise-reduction placement and the measurement/structure split
+        /// (StarDetector.PrepareMeasurementAndStructureSources).
         /// </summary>
-        public GpuEarlyResult Run(Mat srcImage, GpuEarlyParams p, bool hotpixelAlreadyApplied) {
+        /// <param name="structureSource">
+        /// A pre-built structure source (CV_32F, continuous, same size), used instead of deriving one from
+        /// <paramref name="srcImage"/>. Set by the binning hoist, which has to split at native resolution and
+        /// then bin both images. Null on every other path.
+        /// </param>
+        public GpuEarlyResult Run(Mat srcImage, GpuEarlyParams p, bool hotpixelAlreadyApplied, Mat structureSource = null) {
             if (srcImage.Type() != MatType.CV_32F) {
                 throw new ArgumentException("Only CV_32F supported");
             }
             if (!srcImage.IsContinuous()) {
                 throw new ArgumentException("srcImage must be continuous");
+            }
+            if (structureSource != null && (structureSource.Type() != MatType.CV_32F || !structureSource.IsContinuous() || structureSource.Size() != srcImage.Size())) {
+                throw new ArgumentException("structureSource must be a continuous CV_32F Mat the same size as srcImage");
             }
             EnsureCapacity(srcImage.Width, srcImage.Height);
 
@@ -175,43 +200,84 @@ namespace NINA.Joko.Plugins.HocusFocus.Gpu {
             Record("H2D");
 
             long hotpixelCount = 0;
+            long measurementHotpixelCount = 0;
             bool measurementMutated = false;
+            bool measurementDiffers = false;
             bool hotpixelFilteringApplied = hotpixelAlreadyApplied;
 
-            // Step 1: hotpixel filter + optional measurement noise reduction (StarDetector.cs:520-537).
-            if (p.HotpixelFiltering || (p.NoiseReductionRadius > 0 && p.StarMeasurementNoiseReductionEnabled)) {
-                if (!hotpixelAlreadyApplied) {
-                    hotpixelCount = ApplyHotpixelFilter(dMeas, p);
+            // Steps 1-3: the measurement/structure split (StarDetector.PrepareMeasurementAndStructureSources).
+            // The structure source starts from the RAW pixels and takes the median hotpixel filter; the
+            // measurement image takes the isolation repair instead.
+            bool noiseReductionApplied = false;
+            if (!p.MeasurementHotpixelRepair && structureSource == null) {
+                // LEGACY PATH, mirroring StarDetector.PrepareMeasurementAndStructureSources' legacy branch: the
+                // median is applied in place to the measurement image and the structure source copies the RESULT.
+                if (p.HotpixelFiltering || (p.NoiseReductionRadius > 0 && p.StarMeasurementNoiseReductionEnabled)) {
+                    if (!hotpixelAlreadyApplied) {
+                        hotpixelCount = ApplyHotpixelFilter(dMeas, p);
+                        measurementMutated = true;
+                    }
+                    hotpixelFilteringApplied = true;
+                }
+                if (p.NoiseReductionRadius > 0 && p.StarMeasurementNoiseReductionEnabled) {
+                    Gaussian(dMeas, dMeas, p.NoiseReductionRadius * 2 + 1);
+                    noiseReductionApplied = true;
                     measurementMutated = true;
                 }
-                hotpixelFilteringApplied = true;
-            }
-            bool noiseReductionApplied = false;
-            if (p.NoiseReductionRadius > 0 && p.StarMeasurementNoiseReductionEnabled) {
-                Gaussian(dMeas, dMeas, p.NoiseReductionRadius * 2 + 1);
-                noiseReductionApplied = true;
-                measurementMutated = true;
-            }
-            Record("SrcImagePreparation");
-
-            // Steps 2-3: structure-source copy (+ hotpixel there when the measurement image skipped it),
-            // then the structure-side noise reduction (StarDetector.cs:545-557).
-            if (hotpixelFilteringApplied || noiseReductionApplied || p.NoiseReductionRadius <= 0) {
+                Record("SrcImagePreparation");
                 dMeas.View.CopyTo(stream, dNoiseReduced.View);
+                if (!hotpixelFilteringApplied && !noiseReductionApplied && p.NoiseReductionRadius > 0) {
+                    hotpixelCount = ApplyHotpixelFilter(dNoiseReduced, p);
+                }
+                if (p.NoiseReductionRadius > 0 && !noiseReductionApplied) {
+                    Gaussian(dNoiseReduced, dNoiseReduced, p.NoiseReductionRadius * 2 + 1);
+                    measurementDiffers = true;
+                }
             } else {
-                dMeas.View.CopyTo(stream, dNoiseReduced.View);
-                hotpixelCount = ApplyHotpixelFilter(dNoiseReduced, p);
-            }
-            if (p.NoiseReductionRadius > 0 && !noiseReductionApplied) {
-                Gaussian(dNoiseReduced, dNoiseReduced, p.NoiseReductionRadius * 2 + 1);
+                if (structureSource != null) {
+                    // A caller only supplies a structure source because it already performed the split itself (the
+                    // binning hoist), so the two images necessarily hold different pixels.
+                    Upload(structureSource, dNoiseReduced);
+                    measurementDiffers = true;
+                } else {
+                    dMeas.View.CopyTo(stream, dNoiseReduced.View);
+                    if (p.HotpixelFiltering || (p.NoiseReductionRadius > 0 && p.StarMeasurementNoiseReductionEnabled)) {
+                        if (!hotpixelAlreadyApplied) {
+                            hotpixelCount = ApplyHotpixelFilter(dNoiseReduced, p);
+                            measurementHotpixelCount = RepairIsolatedHotpixels(dMeas);
+                            measurementMutated = true;
+                            measurementDiffers = true;
+                        }
+                        hotpixelFilteringApplied = true;
+                    }
+                }
+
+                if (p.NoiseReductionRadius > 0 && p.StarMeasurementNoiseReductionEnabled) {
+                    Gaussian(dMeas, dMeas, p.NoiseReductionRadius * 2 + 1);
+                    noiseReductionApplied = true;
+                    measurementMutated = true;
+                }
+                Record("SrcImagePreparation");
+
+                // The structure source still needs its own hotpixel pass when the measurement image skipped one
+                // entirely (hotpixel filtering off, but a noise-reduction radius configured).
+                if (structureSource == null && !hotpixelFilteringApplied && p.NoiseReductionRadius > 0) {
+                    hotpixelCount = ApplyHotpixelFilter(dNoiseReduced, p);
+                    measurementDiffers = true;
+                }
+                if (p.NoiseReductionRadius > 0) {
+                    Gaussian(dNoiseReduced, dNoiseReduced, p.NoiseReductionRadius * 2 + 1);
+                    if (!noiseReductionApplied) {
+                        measurementDiffers = true;
+                    }
+                }
             }
             dNoiseReduced.View.CopyTo(stream, dStructure.View);
             Record("StructureMapPreparation");
 
             // K-σ noise estimates (concurrent tasks on CPU; sequential launches here — same math).
             result.StructureNoise = KappaSigma(dNoiseReduced, p.NoiseClippingMultiplier);
-            var measurementImageDiffers = p.NoiseReductionRadius > 0 && !noiseReductionApplied;
-            result.MeasurementNoise = measurementImageDiffers ? KappaSigma(dMeas, p.NoiseClippingMultiplier) : result.StructureNoise;
+            result.MeasurementNoise = measurementDiffers ? KappaSigma(dMeas, p.NoiseClippingMultiplier) : result.StructureNoise;
             Record("KSigma");
 
             // Step 4: à-trous wavelet residual, fused subtract + clamp on the last layer
@@ -262,7 +328,44 @@ namespace NINA.Joko.Plugins.HocusFocus.Gpu {
             }
 
             result.HotpixelCount = hotpixelCount;
+            result.MeasurementHotpixelCount = measurementHotpixelCount;
+            result.MeasurementDiffersFromStructure = measurementDiffers;
             return result;
+        }
+
+        /// <summary>
+        /// Isolated-hotpixel repair on the MEASUREMENT image, in place — the GPU mirror of
+        /// <c>HotpixelFiltering.RepairIsolatedHotpixels</c>. Builds the same coarse local-background grid
+        /// (block median + 1.4826·MAD σ) on the RAW image, precomputes the 3x3 median into dTmp, runs the
+        /// repair into dSmooth (the kernel reads unmodified neighbours, so it cannot write in place), and
+        /// copies the result back. dSmooth is scratch until the wavelet, and dTmp is scratch throughout.
+        /// </summary>
+        private long RepairIsolatedHotpixels(MemoryBuffer1D<float, Stride1D.Dense> image) {
+            if (width < 3 || height < 3) {
+                // Mirrors the CPU early-out. Without it the kernel would still repair pixels on a degenerate
+                // frame that the oracle leaves alone, and oracle parity is the whole point of this pair.
+                return 0L;
+            }
+            int blockSize = Utility.HotpixelFiltering.IsolatedHotpixelBackgroundBlockSize;
+            int gridCols = (width + blockSize - 1) / blockSize;
+            int gridRows = (height + blockSize - 1) / blockSize;
+            int cells = gridRows * gridCols;
+            if (cells > MaxGridCells) {
+                throw new NotSupportedException($"Grid of {cells} cells exceeds the {MaxGridCells} buffer");
+            }
+            var gridMedian = dGridOut.View.SubView(0, cells);
+            var gridSigma = dGridOut.View.SubView(MaxGridCells, cells);
+            localGrid(stream, new KernelConfig(cells, 256), image.View, width, height, blockSize, gridCols, gridMedian, gridSigma, Utility.HotpixelFiltering.IsolatedHotpixelSigmaFloor);
+
+            median3x3(stream, (int)length, image.View, dTmp.View, width, height);
+            dHotCount.MemSetToZero(stream);
+            isolatedHotpixelRepair(stream, (int)length, image.View, dTmp.View, gridMedian, gridSigma, dSmooth.View, dHotCount.View, width, height, blockSize);
+            dSmooth.View.CopyTo(stream, image.View);
+
+            var count = new long[1];
+            dHotCount.View.CopyToCPU(stream, count);
+            stream.Synchronize();
+            return count[0];
         }
 
         private CvImageUtility.LocalBackgroundGrid ComputeGridOnGpu(MemoryBuffer1D<float, Stride1D.Dense> image, int blockSize) {
