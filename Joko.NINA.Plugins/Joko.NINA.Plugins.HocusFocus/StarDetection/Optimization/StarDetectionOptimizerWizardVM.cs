@@ -695,7 +695,10 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection.Optimization {
             : this(
                 profileService,
                 HocusFocusPlugin.StarDetectionOptions,
-                new RunEvaluationLoader(profileService, imageDataFactory, imagingMediator, autoFocusEngine, detection),
+                // Same cameraSensorType probe the Review builder below gets: one loader, one CFA decision,
+                // for both wizard steps.
+                new RunEvaluationLoader(profileService, imageDataFactory, autoFocusEngine, detection,
+                    cameraSensorType: () => cameraMediator?.GetInfo()?.SensorType),
                 autoFocusEngine,
                 folderPicker: PickFolderViaDialog,
                 // The optimizer's detection mirrors AF detection on the full image; the loader's own default is

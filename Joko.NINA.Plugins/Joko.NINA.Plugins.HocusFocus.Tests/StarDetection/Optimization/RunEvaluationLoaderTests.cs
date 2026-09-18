@@ -22,7 +22,7 @@ using NUnit.Framework;
 namespace NINA.Joko.Plugins.HocusFocus.Tests.StarDetection.Optimization;
 
 /// <summary>
-/// The wizard-side loader is heavily NINA-coupled (image factory + imaging mediator + real star detection),
+/// The wizard-side loader is NINA-coupled (image factory + real star detection),
 /// so its end-to-end path is exercised in T6 against the user's real AF run folder. Here we only verify it
 /// constructs and rejects null collaborators, so a wiring mistake is caught early.
 /// </summary>
@@ -34,7 +34,6 @@ public class RunEvaluationLoaderTests {
         Assert.DoesNotThrow(() => new RunEvaluationLoader(
             Substitute.For<IProfileService>(),
             Substitute.For<IImageDataFactory>(),
-            Substitute.For<IImagingMediator>(),
             Substitute.For<IAutoFocusEngine>(),
             Substitute.For<IHocusFocusStarDetection>()));
     }
@@ -44,7 +43,6 @@ public class RunEvaluationLoaderTests {
         Assert.Throws<ArgumentNullException>(() => new RunEvaluationLoader(
             null,
             Substitute.For<IImageDataFactory>(),
-            Substitute.For<IImagingMediator>(),
             Substitute.For<IAutoFocusEngine>(),
             Substitute.For<IHocusFocusStarDetection>()));
     }
