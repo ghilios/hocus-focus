@@ -22,7 +22,7 @@ BOXES = {
     "af-review-controls":   (4.30, 1.60),
     "af-review-good":       (7.28, 4.55),
     "af-review-bad":        (5.50, 4.55),
-    "wizard-setup":        (11.93, 3.30),
+    "wizard-setup":         (6.45, 4.55),
     "wizard-step":          (5.50, 2.60),
     "wizard-result":        (5.90, 4.55),
     "guidance":            (11.33, 2.60),

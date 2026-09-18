@@ -38,13 +38,18 @@ module.exports = function ch3(pres) {
       Setup is short. Pick your adapter from the presets — Neumann CTU, the ASG Photon Cage family, the motorized ASG EAT, the OGMA tilters — or choose Manual and type in the numbers. If your adapter isn't in the list, message me with its thread pitch, screw count and screw radius and I'll add a preset. Three-screw and four-screw adapters are both supported. You can name the screws whatever you call them, and those names are used everywhere afterwards.
       Docs: ${DOCS.wizard}`,
   });
-  T.kicker(s, "TILT ADAPTER CALIBRATION WIZARD: TELL IT ABOUT YOUR ADAPTER", { x: MX, y: TOP - 0.2, w: 10 });
-  const c20 = T.shot(s, "wizard-setup.png", { x: MX, y: TOP + 0.2, w: W - 2 * MX, h: 3.3, alignX: "left", alignY: "top" }, { fallback: "doc-wizard-setup.png" });
-  T.columns3(s, [
-    ["Presets for popular adapters", "Neumann, ASG, OGMA and more. Not listed? Message me and I'll add yours"],
-    ["3 or 4 screws, by hand or motor", "Manual adapters and the ASG EAT"],
-    ["Thread pitch and screw radius", "Filled in by the preset, or typed from your adapter's spec"],
-  ], c20.y + c20.h + 0.2, { headSize: 17, bodySize: 14 });
+  // Shot left, points right (slide 6's idiom). The wizard's settings pane is portrait -- roughly 1.4:1
+  // with the adapter rows, the motorized connection and the screw labels all open -- so the original
+  // full-width 3.3in strip letterboxed it by 62%. Sizing the card to the real panel keeps the capture
+  // honest instead of cropping away the rows the three points below actually refer to.
+  const c20 = T.shot(s, "wizard-setup.png", { x: MX, y: TOP, w: 6.45, h: BOTTOM - TOP, alignX: "left", alignY: "top" }, { fallback: "doc-wizard-setup.png" });
+  T.kicker(s, "TELL IT ABOUT YOUR ADAPTER", { x: 7.55, y: c20.y, w: 5.1 });
+  T.bullets(s, [
+    [{ text: "Presets for popular adapters", bold: true }, " \u2014 Neumann, ASG, OGMA and more. Not listed? Message me and I'll add yours"],
+    [{ text: "3 or 4 screws, by hand or motor", bold: true }, " \u2014 manual adapters and the ASG EAT"],
+    [{ text: "Thread pitch and screw radius", bold: true }, " \u2014 filled in by the preset, or typed from your adapter's spec"],
+    [{ text: "Name the screws", bold: true }, " whatever you call them, and those names are used everywhere afterwards"],
+  ], { x: 7.55, y: c20.y + 0.4, w: 5.08, h: c20.h - 0.4 }, { size: 18 });
 
   // 21 — The calibration, step by step
   s = T.newSlide(pres, {
