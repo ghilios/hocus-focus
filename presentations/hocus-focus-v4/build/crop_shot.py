@@ -28,7 +28,7 @@ BOXES = {
     "guidance":            (11.33, 2.60),
     "tilt-history":         (7.28, 4.55),
     "eat-connection":       (6.40, 4.55),
-    "eat-review-commands":  (6.63, 4.55),
+    "eat-review-commands":  (4.25, 4.55),
     "sim-frame-focused":    (3.75, 2.75),
     "sim-frame-defocused":  (3.75, 2.75),
     "sim-tilt-panel":       (3.75, 2.75),

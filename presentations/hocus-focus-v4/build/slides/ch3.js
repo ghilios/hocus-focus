@@ -342,7 +342,10 @@ module.exports = function ch3(pres) {
   T.iconRow(s, "hand", "You approve every move", "Review each motor command first. Apply tilt, backfocus, or both", MX, y32 + 0.1, 5.0);
   T.iconRow(s, "moves", "At most three moves", "For a complete tilt and backfocus correction", MX, y32 + 1.5, 5.0);
   T.iconRow(s, "undo", "Got worse? Revert", "One click undoes the moves. Then measure again", MX, y32 + 2.9, 5.0);
-  T.shot(s, "eat-review-commands.png", { x: 6.0, y: TOP, w: 6.63, h: BOTTOM - TOP }, { label: "“Review motor commands” approval dialog" });
+  // The approval dialog is portrait (~0.93) AND dark-themed, so a wide card would frame it with
+  // visible white bands rather than the invisible ones a light panel gets. Sized to the dialog and
+  // centred in the space right of the icon rows.
+  T.shot(s, "eat-review-commands.png", { x: 7.19, y: TOP, w: 4.25, h: BOTTOM - TOP }, { label: "“Review motor commands” approval dialog" });
 
   // 33 — Simulators
   s = T.newSlide(pres, {
