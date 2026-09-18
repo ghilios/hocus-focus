@@ -136,5 +136,25 @@ namespace NINA.Joko.Plugins.HocusFocus.Tests.StarDetection {
                     "calling the format loaders itself with a hard-coded isBayered");
             });
         }
+
+        [Test]
+        public void TheOptimizersRunLoaderLoadsThroughTheSharedSeam() {
+            // The wizard's Review step was migrated to the shared seam on 2026-07-29; its OPTIMIZE step was not,
+            // so the frames a user inspects in Review were never provably the frames the optimizer scored. The
+            // stretch itself is inert (DebayeredImage.Stretch returns a DebayeredImage, so StarDetector takes the
+            // same branch either way) — what matters is that one loader owns the decision, because "two callers
+            // that happen to agree today" is exactly the shape the mosaic bug had.
+            var loader = SourceFiles("Joko.NINA.Plugins.HocusFocus")
+                .Single(f => f.Name == "RunEvaluationLoader.cs");
+            var source = StripComments(File.ReadAllText(loader.FullName));
+
+            Assert.Multiple(() => {
+                Assert.That(source, Does.Contain("RenderedImageLoading.ForDetection"),
+                    "the optimizer's run loader must build its detection input through the shared seam");
+                Assert.That(source, Does.Not.Contain("PrepareImage"),
+                    "imagingMediator.PrepareImage is the DISPLAY pipeline. Detection input comes from " +
+                    "RenderedImageLoading.ForDetection, which is what the Review step already uses.");
+            });
+        }
     }
 }

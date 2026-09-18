@@ -12,7 +12,6 @@
 
 using NINA.Core.Enum;
 using NINA.Core.Utility;
-using NINA.Equipment.Interfaces.Mediator;
 using NINA.Image.Interfaces;
 using NINA.Joko.Plugins.HocusFocus.Interfaces;
 using NINA.Joko.Plugins.HocusFocus.Utility;
@@ -113,14 +112,19 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection.Optimization {
     /// Wizard-side loader: turns a saved auto-focus attempt folder into a <see cref="RunEvaluationData"/> the
     /// optimizer can evaluate. Unlike the pure optimizer (T2) and the image-source-agnostic
     /// <see cref="RunEvaluationData"/> (T3 core), this is intentionally NINA-coupled — it loads exposures via the
-    /// image-data factory + imaging mediator (mirroring <c>InspectorVM.LoadSavedFile</c>) and runs the real
+    /// image-data factory and the shared <see cref="RenderedImageLoading.ForDetection"/> seam, and runs the real
     /// HocusFocus star detector. Its end-to-end path is exercised in T6 against a real AF run folder; the unit
     /// tests cover only construction/argument validation.
+    ///
+    /// <para><b>One loader, both wizard steps.</b> Optimize and Review must score the same pixels, so both build
+    /// their detection input through <c>RenderedImageLoading.ForDetection</c>. Taking no imaging mediator is also
+    /// what makes this type constructible outside NINA, so the offline harness can stop re-implementing it —
+    /// enforced by <c>HeadlessDetectionParityGuardTests</c>.
     /// </summary>
     public sealed class RunEvaluationLoader : IRunEvaluationLoader {
         private readonly IProfileService profileService;
         private readonly IImageDataFactory imageDataFactory;
-        private readonly IImagingMediator imagingMediator;
+        private readonly Func<SensorType?> cameraSensorType;
         private readonly IAutoFocusEngine autoFocusEngine;
         private readonly IHocusFocusStarDetection detection;
         private readonly IAlglibAPI alglibAPI;
@@ -128,13 +132,15 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection.Optimization {
         public RunEvaluationLoader(
             IProfileService profileService,
             IImageDataFactory imageDataFactory,
-            IImagingMediator imagingMediator,
             IAutoFocusEngine autoFocusEngine,
             IHocusFocusStarDetection detection,
-            IAlglibAPI alglibAPI = null) {
+            IAlglibAPI alglibAPI = null,
+            Func<SensorType?> cameraSensorType = null) {
             this.profileService = profileService ?? throw new ArgumentNullException(nameof(profileService));
             this.imageDataFactory = imageDataFactory ?? throw new ArgumentNullException(nameof(imageDataFactory));
-            this.imagingMediator = imagingMediator ?? throw new ArgumentNullException(nameof(imagingMediator));
+            // Live's last-resort CFA source, exactly as the Review step passes it. Null headless, where an
+            // unresolvable Bayer pattern then fails loudly rather than debayering at a guessed phase.
+            this.cameraSensorType = cameraSensorType;
             this.autoFocusEngine = autoFocusEngine ?? throw new ArgumentNullException(nameof(autoFocusEngine));
             this.detection = detection ?? throw new ArgumentNullException(nameof(detection));
             // The plugin singleton is the production source; allow null here only so the dependency is overridable.
@@ -181,7 +187,7 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection.Optimization {
             var loadedCount = 0;
             foreach (var savedImage in attempt.SavedImages) {
                 token.ThrowIfCancellationRequested();
-                var rendered = await LoadRenderedImageAsync(savedImage, afOptions, token).ConfigureAwait(false);
+                var rendered = await LoadRenderedImageAsync(savedImage, token).ConfigureAwait(false);
                 if (firstImage == null) {
                     firstImage = rendered;
                 }
@@ -276,20 +282,25 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection.Optimization {
             };
         }
 
-        private async Task<IRenderedImage> LoadRenderedImageAsync(SavedAutoFocusImage savedImage, AutoFocusEngineOptions afOptions, CancellationToken token) {
+        /// <summary>
+        /// The DETECTION input for one run frame, built through the shared
+        /// <see cref="RenderedImageLoading.ForDetection"/> seam — the same call the wizard's Review step makes,
+        /// so the frames a user inspects are by construction the frames the optimizer scored.
+        ///
+        /// <para><b>Why the imaging mediator is gone.</b> This used to call
+        /// <c>imagingMediator.PrepareImage(autoStretch: true, detectStars: false)</c>. The stretch is display-only
+        /// and detection never reads it: <c>DebayeredImage.Stretch</c> returns a <c>DebayeredImage</c> carrying the
+        /// same <c>RawImageData</c>, <c>SaveLumChannel == false</c> and the same <c>BayerPattern</c>, so
+        /// <c>StarDetector.PrepareSrcImageFromRenderedImage</c> took the identical branch either way — verified in
+        /// the shipped <c>NINA.Image</c> IL, not assumed. Removing it is therefore behaviour-preserving, and it
+        /// buys two things: one loader owns the debayer decision for BOTH wizard steps, and the loader no longer
+        /// needs a mediator, which is what lets the offline harness construct it at all.</para>
+        /// </summary>
+        private async Task<IRenderedImage> LoadRenderedImageAsync(SavedAutoFocusImage savedImage, CancellationToken token) {
             var imageData = await imageDataFactory.CreateFromFile(
                 savedImage.Path, savedImage.BitDepth, savedImage.IsBayered,
                 profileService.ActiveProfile.CameraSettings.RawConverter, token).ConfigureAwait(false);
-
-            // Auto-stretch unless contrast-detection statistics are in play (mirrors InspectorVM.LoadSavedFile).
-            var autoStretch = true;
-            if (afOptions.AutoFocusMethod == AFMethodEnum.CONTRASTDETECTION
-                && profileService.ActiveProfile.FocuserSettings.ContrastDetectionMethod == ContrastDetectionMethodEnum.Statistics) {
-                autoStretch = false;
-            }
-
-            var prepareParameters = new PrepareImageParameters(autoStretch: autoStretch, detectStars: false);
-            return await imagingMediator.PrepareImage(imageData, prepareParameters, token).ConfigureAwait(false);
+            return RenderedImageLoading.ForDetection(imageData, profileService, cameraSensorType?.Invoke());
         }
 
         /// <summary>
