@@ -102,7 +102,11 @@ module.exports = function ch1(pres) {
   const c9 = T.shot(s, "optimizer-summary.png", { x: MX, y: TOP + 0.25, w: 7.3, h: BOTTOM - TOP - 0.25, alignX: "left", alignY: "top" }, { fallback: "doc-optimizer-summary.png" });
   const r9 = c9.y + (c9.h - 3.75) / 2;
   T.iconRow(s, "curve", "A tighter focus curve", "Before and after, with the focus precision for each", 8.35, r9 + 0.1, 4.28);
-  T.iconRow(s, "stars", "More stars per frame", "Counted at every focuser position, not just at best focus", 8.35, r9 + 1.4, 4.28);
+  // Not "more stars": on real runs the default (focus) objective usually keeps FEWER, better-measured
+  // stars -- 111 -> 81 at best focus on the captured example -- because it drops marginal detections that
+  // add noise to every HFR. More stars is what the "optimize for aberration inspection" switch buys
+  // (same run: 111 -> 123), which is slide 26's material, not this slide's.
+  T.iconRow(s, "stars", "Stars per frame, position by position", "Counted at every focuser position, not just at best focus", 8.35, r9 + 1.4, 4.28);
   T.iconRow(s, "step", "Autofocus advice", "A step size that suits your curve, and a longer exposure when the frames need it", 8.35, r9 + 2.7, 4.28);
 
   // 10 — The catch
