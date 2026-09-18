@@ -63,7 +63,11 @@ def main():
     scale = w / on_slide_w
     os.makedirs(OUT, exist_ok=True)
     dst = os.path.normpath(os.path.join(OUT, name + ".png"))
-    im.save(dst)
+    # The PowerShell capture writes 32-bit ARGB, whose alpha is always fully opaque for a screen
+    # grab. Keeping it roughly triples the size of the photographic shots for no benefit, so drop it.
+    if im.mode != "RGB":
+        im = im.convert("RGB")
+    im.save(dst, optimize=True)
     print(f"{name}: {w}x{h}  image AR {img_ar:.2f}  box AR {box_ar:.2f}")
     print(f"  on-slide width {on_slide_w:.0f}px -> native scale {scale:.2f}x"
           + ("  OK" if scale >= 1.0 else "  *** UNDER 1x: will be upscaled ***"))

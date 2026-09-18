@@ -157,7 +157,24 @@ function statement(s, head, body, box, { headSize = 19, bodySize = 15, valign = 
   ], { ...box, valign, align, margin: 0, isTextBox: true });
 }
 
+// A shape with a non-positive width or height produces a pptx that PowerPoint refuses to open with
+// nothing more diagnostic than "PowerPoint could not open the file" -- the package is still valid zip
+// and valid XML, so no structural check catches it. It happens when a layout derives one box from
+// another (panel height = what's left under a card) and the card turns out taller than assumed. Fail
+// at build time, naming the box, instead of shipping a deck that cannot be opened.
+function assertBox(box, where) {
+  for (const k of ["w", "h"]) {
+    const v = box[k];
+    if (v !== undefined && !(v > 0)) {
+      throw new Error(`${where}: ${k}=${v} is not positive (box ${JSON.stringify(box)}). ` +
+        "A derived height has gone negative -- check what this box is measured from.");
+    }
+  }
+  return box;
+}
+
 function text(s, str, box, o = {}) {
+  assertBox({ ...box, ...o }, `text(${JSON.stringify(String(str)).slice(0, 40)})`);
   s.addText(str, { fontFace: FONT.body, fontSize: 18, color: C.text, margin: 0, valign: "top", isTextBox: true, ...box, ...o });
 }
 
@@ -168,6 +185,7 @@ function kicker(s, str, box, color = C.lav) {
 
 // Two panel styles only: neutral, and highlighted with one accent (amber only on SNR-thread slides).
 function panel(s, box, { accent } = {}) {
+  assertBox(box, "panel");
   s.addShape("roundRect", { ...box, rectRadius: 0.14, fill: { color: accent ? C.panelHi : C.panel, transparency: accent ? 0 : 8 }, line: { color: accent || C.line, width: accent ? 1.5 : 0.75 } });
 }
 

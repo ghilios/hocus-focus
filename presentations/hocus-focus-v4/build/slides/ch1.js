@@ -33,14 +33,18 @@ module.exports = function ch1(pres) {
       Options on this page: recover out-of-focus donut stars (for reflectors and SCTs), and optimize for aberration inspection — remember that one, it matters later. With per-filter star detection enabled you can tune each filter separately.
       Docs: ${DOCS.optimization}`,
   });
-  const c6 = T.shot(s, "optimizer-start.png", { x: MX, y: TOP, w: 7.0, h: BOTTOM - TOP, alignX: "left", alignY: "top" }, { fallback: "doc-optimizer-start.png" });
+  // Height is capped so the "remember these two switches" panel below always has room. The box used to
+  // be the full TOP..BOTTOM span, which only worked because the old doc crop was wide (2.2:1) and so
+  // fitted short. A capture that matches the box aspect fills it, the panel's derived height goes
+  // negative, and the deck stops opening in PowerPoint -- see assertBox in theme.js.
+  const P6H = 1.25, c6 = T.shot(s, "optimizer-start.png", { x: MX, y: TOP, w: 7.0, h: BOTTOM - TOP - P6H - 0.3, alignX: "left", alignY: "top" }, { fallback: "doc-optimizer-start.png" });
   T.kicker(s, "THE OPTIMIZATION WIZARD", { x: 8.1, y: c6.y, w: 4.5 });
   T.bullets(s, [
     [{ text: "Point it at a saved autofocus run", bold: true }, ", or let it capture one live"],
     "It re-runs star detection on those frames with many combinations of settings",
     [{ text: "It keeps what best pins down focus", bold: true }, " for your rig and your sky"],
   ], { x: 8.1, y: c6.y + 0.4, w: 4.53, h: c6.h - 0.4 }, { size: 19 });
-  const p6 = c6.y + c6.h + 0.3, h6 = BOTTOM - p6, half6 = (W - 2 * MX - 0.7) / 2;
+  const p6 = BOTTOM - P6H, h6 = P6H, half6 = (W - 2 * MX - 0.7) / 2;
   T.panel(s, { x: MX, y: p6, w: W - 2 * MX, h: h6 });
   T.kicker(s, "REMEMBER THESE TWO SWITCHES", { x: MX + 0.35, y: p6 + 0.1, w: 6 });
   ["Recover out-of-focus donut stars", "Optimize for aberration inspection"].forEach((t, i) =>
