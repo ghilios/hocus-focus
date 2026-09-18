@@ -9,6 +9,11 @@
 *.yml   text eol=lf
 *.yaml  text eol=lf
 
+# Shell scripts must stay LF in the working tree: with core.autocrlf=true a checkout
+# would otherwise hand WSL a CRLF script, and the kernel then looks for an interpreter
+# literally named "bash\r" ("/usr/bin/env: 'bash\r': No such file or directory").
+*.sh    text eol=lf
+
 # Workflow scripts must stay LF in the working tree: the Claude Code Workflow tool
 # rejects scripts containing CR as "control characters" in the approval dialog.
 .claude/workflows/*.js text eol=lf
