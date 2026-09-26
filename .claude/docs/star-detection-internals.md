@@ -26,6 +26,83 @@ unaffected) for cleaner sigma/FWHM/eccentricity.
 
 For the headless TestApp diagnostic that exercises this test, see `testapp-cli.md`.
 
+## Measurement image vs structure source (two hotpixel filters)
+
+**Gated by `StarDetectorParams.MeasurementHotpixelRepair` / `StarDetectionOptions.MeasurementHotpixelRepair`,
+which is OFF unless a configuration was deliberately re-derived.** With it off the pipeline takes a legacy
+branch that is BIT-IDENTICAL to the pipeline before the option existed (pinned by
+`StarDetectorEquivalenceTests`, whose golden signature is once again develop's). The option turns itself on in
+exactly two places, both of which re-derive the acceptance gates in the same breath: `ResetDefaults` and
+`ApplyOptimizedSettings`. An ESTABLISHED profile reads FALSE, and a settings file with no such field
+deserializes to FALSE, so neither can switch it on.
+
+**First-run seeding.** `InitializeOptions` seeds a BRAND-NEW profile by calling `ResetDefaults` and then
+`PersistAllSettings`, so a fresh install both gets the current defaults (this option among them) and writes
+every value down explicitly — which is what keeps a profile portable when a code default later changes. It
+tells a virgin profile from an established one by `IntermediateSavePath`, which `InitializeOptions`' first run
+has always written; from then on a `SettingsInitialized` marker answers instead. `PersistAllSettings` bypasses
+the change guard in every setter on purpose: `ResetDefaults` alone persists almost nothing, because a default
+that already equals what was just read is not a change. `FreshInstall_PersistsEveryOptionItReads` compares the
+accessor's read-key set against its written-key set, so the two lists cannot drift. Two tests assert the deliberate reset-vs-construction difference rather
+than skipping it (`DeliberatelyDiffersFromFreshConstruction`, and the second named exception in
+`BuildDefaultStarDetectorParams_MatchesConstructedOptionsBuild`).
+
+**Why it is gated at all:** it changes what two shipped gates MEAN. The measurement image's K-sigma becomes the
+frame's honest noise (the median was suppressing it), so `Sensitivity` is a stricter bar; and every star
+measures a smaller HFR, so `MinHFR` is a stricter floor. Which one bites depends on the rig — the investigated
+frame lost 17% of its stars to Sensitivity, a synthetic frame lost 24% to MinHFR, and the real bank at defaults
+was a wash. See `docs/saturated-star-fwhm-fixes-results.md`.
+
+**`FWHM MAD` in the results panel goes UP when this is enabled, and that is correct.** MAD is the spread over
+the whole frame, so it contains the focus gradient across the sensor; the median filter was flattening that
+gradient (0.30 -> 0.46 px top to bottom on the investigated frame) and a flattened field reads as a tighter MAD.
+Per-star precision — the residual after a quadratic field model is removed — improves ~12% on the same stars,
+and ~22% bank-wide. Do not "fix" the MAD rise: it is concentrated in the BRIGHTEST quartile (+17.5%, +23.2%
+restricted to R^2 > 0.98 in both arms) and absent in the faintest, which is the opposite of what measurement
+noise would do. `UsePSFAbsoluteDeviation` is the only knob that pulls MAD back down, and it is not a default.
+
+When ON, `BuildDetectionContextInternal` derives TWO images from the same raw pixels and filters each
+differently (`StarDetector.PrepareMeasurementAndStructureSources`):
+
+| | image | hotpixel filter | who reads it |
+|---|---|---|---|
+| structure | `noiseReducedImage` -> `structureMap` | `ApplyHotpixelFilter` — the 3x3 median, thresholded per `HotpixelThresholdingEnabled` | candidate formation (wavelet, binarize, flood fill) |
+| measurement | `srcImage` (`ctx.MeasurementImage`) | `HotpixelFiltering.RepairIsolatedHotpixels` — the isolation test | `MeasureStar` (HFR, background, peak), `ModelPSF` |
+
+- **The isolation test:** amplitude above a coarse local background (block median, 128 px, bilinear) must
+  exceed 5 local sigmas AND the brightest of the eight neighbours must sit below 1/3 of that amplitude.
+  Qualifying pixels get their 3x3 median. A hot pixel passes; a star core fails the second test, because its
+  neighbours carry most of its amplitude.
+- **Why not the median on the measurement image:** it drops a bright star's peak ~20%, biases every fitted
+  FWHM ~6% high and flattens ~a third of the real focus gradient. The thresholded variant is no better — a
+  star core deviates from its own 3x3 median exactly as a hot pixel does, so at the 0.001 default it rewrites
+  star cores too. Evidence: `docs/saturated-star-fwhm-investigation-results.md` Part 4 and
+  `docs/saturated-star-fwhm-fixes-results.md`.
+- **Why the structure path keeps the median:** candidate formation needs the smoothing. Running detection on
+  an unsmoothed frame loses ~26% of detections.
+- **σ consistency:** the two images now differ in configurations where they used to be identical, so
+  `measurementDiffersFromStructure` (not the old `NoiseReductionRadius > 0 && !noiseReductionApplied`) decides
+  whether the measurement image gets its own K-σ estimate. The measurement σ is now the frame's HONEST noise
+  — the median was suppressing it — which makes the `Sensitivity` gate bite harder at the same setting.
+- **GPU parity is exact, and checkable:** `bench-gpu --compare --image <frame>` prints
+  `measurement hotpixel repairs: cpu=N gpu=N` and the measurement-image diff. On the 61 MP investigated frame
+  both report 223982 repairs and the image is bit-identical (0 pixels differing). A zero on BOTH sides means the
+  repair never ran and the image diff proves nothing — the compare says so.
+- **Mirrors that must move together:** `Gpu/GpuEarlyChain.cs` (+ `IsolatedHotpixelRepairKernel`),
+  `TestApp/Gpu/CpuEarlyChain.cs` (the `bench-gpu --compare` oracle), and `TestApp/StarProbeRunner.cs`'s
+  measurement reconstruction. With `DetectionBinning > 1` the split happens at NATIVE resolution and both
+  images are binned; the binned structure source is handed to the early span as `structureSource`.
+
+## Saturated stars get no PSF fit
+
+`ModelPSF` skips any star with `Background + PeakBrightness >= SaturationThreshold`, leaving `Star.PSF` null
+(every consumer already handles that, including the frame's FWHM/Sigma/Eccentricity medians). It is NOT
+counted as a `PSFFitFailed` — the fit was never attempted — and `metrics.Saturated` already counts these
+stars. A clipped core is masked out of the sample set, so the fit sees wings only and the width is not
+identifiable from them: the amplitude runs into its solver bound and the width absorbs the rest. Measured
+errors against unsaturated neighbours ran -15% to +54% with the sign set by how much of the core survived,
+and neither the R^2 gate nor a reduced-chi^2 gate separates them.
+
 ## Software Detection Binning
 
 `StarDetectorParams.DetectionBinning` (int, 1 = off) resamples the frame at the top of

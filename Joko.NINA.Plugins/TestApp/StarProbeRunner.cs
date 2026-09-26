@@ -1,4 +1,4 @@
-#region "copyright"
+﻿#region "copyright"
 
 /*
     Copyright © 2021 - 2026 George Hilios <ghilios+NINA@googlemail.com>
@@ -72,7 +72,7 @@ namespace TestApp {
             if (string.IsNullOrWhiteSpace(imagePath)) {
                 Console.Error.WriteLine(
                     "Usage: TestApp star-probe --image <path> [--settings <path>] [--profile-id <guid>] [--out <dir>]\n" +
-                    "                          [--near <x,y>] [--radius <px>] [--top <n>] [--psf-sweep]");
+                    "                          [--near <x,y>] [--radius <px>] [--top <n>] [--psf-sweep] [--hotpixel-census]");
                 Environment.ExitCode = 2;
                 return;
             }
@@ -102,6 +102,7 @@ namespace TestApp {
             var radius = ParseDouble(DiagnosticUtil.GetArg(args, "--radius"), 250.0);
             var top = (int)ParseDouble(DiagnosticUtil.GetArg(args, "--top"), 25);
             var psfSweep = DiagnosticUtil.HasFlag(args, "--psf-sweep");
+            var hotpixelCensus = DiagnosticUtil.HasFlag(args, "--hotpixel-census");
 
             Logger.SetLogLevel(LogLevelEnum.INFO);
             if (Application.Current == null) {
@@ -142,23 +143,40 @@ namespace TestApp {
             DetectionBinningResolver.ApplyFactor(p, DetectionBinningResolver.ToFactor(options.DetectionBinning));
             Console.WriteLine($"PSFFitType={p.PSFFitType}, PSFResolution={p.PSFResolution}, PSFGoodnessOfFitThreshold={p.PSFGoodnessOfFitThreshold}, " +
                 $"SaturationThreshold={p.SaturationThreshold.ToString(CultureInfo.InvariantCulture)}, HotpixelFiltering={p.HotpixelFiltering}, " +
-                $"HotpixelThresholdingEnabled={p.HotpixelThresholdingEnabled}, StarMeasurementNoiseReduction={p.StarMeasurementNoiseReductionEnabled}, " +
+                $"HotpixelThresholdingEnabled={p.HotpixelThresholdingEnabled}, MeasurementHotpixelRepair={p.MeasurementHotpixelRepair}, " +
+                $"StarMeasurementNoiseReduction={p.StarMeasurementNoiseReductionEnabled}, " +
                 $"DetectionBinning={p.DetectionBinning}");
 
             var result = await source.DetectAsync(Detector, p, CancellationToken.None);
             Console.WriteLine($"Detected {result.DetectedStars.Count} stars (PsfFitFailed={result.Metrics.PSFFitFailed}, Saturated={result.Metrics.Saturated})");
+            PrintRejectionCensus(result.Metrics);
 
             // The measurement image the detector fitted against, reconstructed: display Mat + the same in-place
             // hotpixel filter. Only used for the saturation/sample census and the --psf-sweep refits, and only
             // faithful for an unbinned mono frame (see the class remarks).
             using var measurement = source.CreateDisplayMat();
+            if (hotpixelCensus) {
+                PrintHotpixelCensus(measurement);
+            }
             var bayered = DiagnosticUtil.IsBayeredFrameFileName(imagePath);
             var reconstructionFaithful = !bayered && p.DetectionBinning <= 1;
             if (p.HotpixelFiltering || (p.NoiseReductionRadius > 0 && p.StarMeasurementNoiseReductionEnabled)) {
-                if (p.HotpixelThresholdingEnabled) {
-                    HotpixelFiltering.HotpixelFilterWithThresholding(measurement, p.HotpixelThreshold);
+                if (!p.MeasurementHotpixelRepair) {
+                    // Legacy: the measurement image takes the same median the structure path does.
+                    if (p.HotpixelThresholdingEnabled) {
+                        HotpixelFiltering.HotpixelFilterWithThresholding(measurement, p.HotpixelThreshold);
+                    } else {
+                        HotpixelFiltering.HotpixelFilter(measurement);
+                    }
+                    Console.WriteLine("  MeasurementHotpixelRepair is OFF: reconstruction uses the legacy median");
                 } else {
-                    HotpixelFiltering.HotpixelFilter(measurement);
+                // The MEASUREMENT path's filter, which is the isolation repair — NOT the median the structure
+                // path still takes (StarDetector.PrepareMeasurementAndStructureSources).
+                var reconstructionRepaired = HotpixelFiltering.RepairIsolatedHotpixels(measurement);
+                // Reconstruction-fidelity check, the same role the sweep's `base` column plays: this must equal
+                // the detector's own MeasurementHotpixelCount, or the image being refit is not the one detection
+                // measured.
+                Console.WriteLine($"  reconstruction repaired {reconstructionRepaired} isolated hot pixel(s) (must equal measurementRepaired above)");
                 }
             }
             if (p.NoiseReductionRadius > 0 && p.StarMeasurementNoiseReductionEnabled) {
@@ -280,13 +298,108 @@ namespace TestApp {
             return count;
         }
 
+        /// <summary>
+        /// Census of the RAW measurement image's single-pixel outliers, before any filtering: how many pixels sit
+        /// above the local background by 3/5/8 local sigmas, and how many of those are ISOLATED (their brightest
+        /// neighbour under 1/ratio of their own amplitude) at a few ratios. This is what decides how much the
+        /// measurement-path hotpixel repair has to do on a given sensor — and, when it does nothing, says whether
+        /// the frame simply has no single-pixel outliers or the thresholds are mis-scaled for it.
+        /// </summary>
+        private static void PrintHotpixelCensus(Mat raw) {
+            const int Block = 128;
+            var grid = CvImageUtility.ComputeLocalBackgroundGrid(raw, Block, 1e-6f);
+            var sigmas = grid.Sigma.OrderBy(v => v).ToArray();
+            var meds = grid.Median.OrderBy(v => v).ToArray();
+            Console.WriteLine($"  measurement census: local bg median={meds[meds.Length / 2]:E4}, local sigma median={sigmas[sigmas.Length / 2]:E4} " +
+                              $"(p05={sigmas[(int)(0.05 * sigmas.Length)]:E4}, p95={sigmas[(int)(0.95 * sigmas.Length)]:E4})");
+
+            var thresholds = new[] { 3.0f, 5.0f, 8.0f };
+            var ratios = new[] { 3.0f, 2.0f, 1.0f };
+            var above = new long[thresholds.Length];
+            var isolated = new long[thresholds.Length * ratios.Length];
+            int width = raw.Cols, height = raw.Rows;
+
+            for (int y = 0; y < height; ++y) {
+                int gy = Math.Min(grid.GridRows - 1, y / Block);
+                int yUp = y > 0 ? y - 1 : 0;
+                int yDown = y < height - 1 ? y + 1 : height - 1;
+                for (int x = 0; x < width; ++x) {
+                    int gx = Math.Min(grid.GridCols - 1, x / Block);
+                    float bg = grid.MedianAt(gy, gx);
+                    float sig = grid.SigmaAt(gy, gx);
+                    float amp = raw.At<float>(y, x) - bg;
+                    if (amp <= 0) {
+                        continue;
+                    }
+                    int xLeft = x > 0 ? x - 1 : 0;
+                    int xRight = x < width - 1 ? x + 1 : width - 1;
+                    float maxN = float.NegativeInfinity;
+                    for (int ny = yUp; ny <= yDown; ++ny) {
+                        for (int nx = xLeft; nx <= xRight; ++nx) {
+                            if (nx == x && ny == y) {
+                                continue;
+                            }
+                            var v = raw.At<float>(ny, nx);
+                            if (v > maxN) {
+                                maxN = v;
+                            }
+                        }
+                    }
+                    for (int t = 0; t < thresholds.Length; ++t) {
+                        if (amp <= thresholds[t] * sig) {
+                            continue;
+                        }
+                        above[t]++;
+                        for (int r = 0; r < ratios.Length; ++r) {
+                            if ((maxN - bg) * ratios[r] < amp) {
+                                isolated[t * ratios.Length + r]++;
+                            }
+                        }
+                    }
+                }
+            }
+            long total = (long)width * height;
+            for (int t = 0; t < thresholds.Length; ++t) {
+                var parts = string.Join(", ", ratios.Select((r, i) => $"ratio{r:0.#}={isolated[t * ratios.Length + i]}"));
+                Console.WriteLine($"    >{thresholds[t]:0}sigma: {above[t]} ({100.0 * above[t] / total:F4}%) | isolated: {parts}");
+            }
+        }
+
+        /// <summary>
+        /// Why candidates did NOT become stars. A settings or code change that moves the detected count is only
+        /// interpretable next to this: the same drop reads very differently as "rejected below the sensitivity
+        /// bar" than as "rejected for an HFR under the floor".
+        /// </summary>
+        private static void PrintRejectionCensus(StarDetectorMetrics m) {
+            Console.WriteLine(
+                $"  candidates={m.StructureCandidates} totalDetected={m.TotalDetected} | rejected: tooSmall={m.TooSmall} onBorder={m.OnBorder} " +
+                $"tooDistorted={m.TooDistorted} degenerate={m.Degenerate} lowSensitivity={m.LowSensitivity} notCentered={m.NotCentered} " +
+                $"tooFlat={m.TooFlat} tooLowHFR={m.TooLowHFR} hfrFailed={m.HFRAnalysisFailed} contaminated={m.ContaminationSuspected} " +
+                $"tooElongated={m.TooElongated} bloom={m.BloomSuppressed} outsideROI={m.OutsideROI}");
+            Console.WriteLine($"  hotpixels: structure={m.HotpixelCount}{MeasurementHotpixelSuffix(m)} saturatedPixels={m.SaturatedPixelCount}");
+        }
+
+        /// <summary>
+        /// Reads MeasurementHotpixelCount reflectively so this runner still compiles against a plugin build that
+        /// predates the measurement-path hotpixel repair (used to produce before/after arms of one comparison).
+        /// </summary>
+        private static string MeasurementHotpixelSuffix(StarDetectorMetrics m) {
+            var prop = typeof(StarDetectorMetrics).GetProperty("MeasurementHotpixelCount");
+            return prop == null ? string.Empty : $" measurementRepaired={prop.GetValue(m)}";
+        }
+
         private static void PrintTable(List<Row> rows, StarDetectorParams p) {
             Console.WriteLine(
                 "      x       y   box(WxH)  peak    bg     HFR  aper  | PSF: fwhmPx fwhmX fwhmY  sigX  sigY   R2  redChi2   amp   step  samp sat");
             foreach (var r in rows) {
                 var psf = r.Star.PSF;
+                // A saturated star is not a fit FAILURE: the detector never attempts one, because a clipped core
+                // leaves only wings and the width is not identifiable from them.
+                var saturated = (r.Star.Background + r.Star.PeakBrightness) >= p.SaturationThreshold;
                 var psfPart = psf == null
-                    ? "   (no fit - R2 below threshold)                                    "
+                    ? (saturated
+                        ? "   (no fit - saturated, not attempted)                               "
+                        : "   (no fit - R2 below threshold)                                    ")
                     : $"{psf.FWHMPixels,7:F2}{psf.FWHMx,6:F2}{psf.FWHMy,6:F2}{psf.SigmaX,6:F2}{psf.SigmaY,6:F2}{psf.RSquared,6:F3}{psf.ReducedChiSquared,9:F1}{psf.Peak,7:F3}";
                 Console.WriteLine(
                     $"{r.X,8:F1}{r.Y,8:F1}  {r.BW,3}x{r.BH,-3} {r.Peak,7:F3}{r.Background,7:F4}{r.Hfr,7:F2}{r.HfrAperture,6:F1}  | {psfPart}{r.PsfSampling,6:F2}{r.Samples,6}{r.SamplesSaturated,4}");

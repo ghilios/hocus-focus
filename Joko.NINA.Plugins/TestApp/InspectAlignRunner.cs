@@ -1,4 +1,4 @@
-#region "copyright"
+﻿#region "copyright"
 
 /*
     Copyright © 2021 - 2026 George Hilios <ghilios+NINA@googlemail.com>
@@ -150,6 +150,17 @@ namespace TestApp {
             var stepSize = sortedFocusers.Count > 1 ? (int)Math.Round(sortedFocusers[1] - sortedFocusers[0]) : 100;
             var focuserSizeMicrons = inspectorOptions.EffectiveMicronsPerFocuserStep > 0 ? inspectorOptions.EffectiveMicronsPerFocuserStep : 1.0;
             var pixelSize = activeProfile.CameraSettings.PixelSize > 0 ? activeProfile.CameraSettings.PixelSize : 3.76;
+
+            // Opt-in per-star dump: "<label>_stars.csv" (one row per registered star) and "<label>_points.csv"
+            // (the paraboloid's x_um / y_um / z_um data points). Purely observational, so the fit is unchanged.
+            // This is how a before/after pair of builds gets compared at the level the sensor model actually
+            // consumes -- per-star best-focus positions -- rather than at its reported tilt angle.
+            var sensorDiagnostics = DiagnosticUtil.GetArg(args, "--sensor-diagnostics");
+            if (!string.IsNullOrWhiteSpace(sensorDiagnostics)) {
+                SensorModel.DiagnosticsDirectory = sensorDiagnostics;
+                SensorModel.DiagnosticsLabel = DiagnosticUtil.GetArg(args, "--sensor-diagnostics-label") ?? "sensor";
+                Console.WriteLine($"Sensor diagnostics: {SensorModel.DiagnosticsDirectory} (label {SensorModel.DiagnosticsLabel})");
+            }
 
             var messages = new List<string>();
             var sensorModel = new SensorModel(profileService, inspectorOptions, autoFocusOptions, new AlglibAPI()) {

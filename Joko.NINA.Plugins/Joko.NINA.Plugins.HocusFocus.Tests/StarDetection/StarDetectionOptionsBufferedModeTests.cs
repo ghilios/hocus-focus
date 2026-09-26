@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using NINA.Joko.Plugins.HocusFocus.Interfaces;
@@ -16,7 +16,12 @@ public class StarDetectionOptionsBufferedModeTests {
 
     private static (StarDetectionOptions options, InMemoryPluginOptionsAccessor store) Build() {
         var profile = Substitute.For<IProfileService>();
+        // An ESTABLISHED profile: buffered mode is about suppressing writes to a profile that already has
+        // settings, not about a fresh install (which seeds defaults on construction and would leave this store
+        // pre-populated before the test even starts). InitializeOptions recognises an established profile by
+        // IntermediateSavePath, which its first run always writes.
         var store = new InMemoryPluginOptionsAccessor();
+        store.SetValueString(nameof(StarDetectionOptions.IntermediateSavePath), @"C:\temp\HocusFocusIntermediate");
         var options = new StarDetectionOptions(profile, store);
         return (options, store);
     }

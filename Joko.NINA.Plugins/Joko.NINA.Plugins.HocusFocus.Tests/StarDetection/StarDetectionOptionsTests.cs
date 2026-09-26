@@ -1,6 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
+using NINA.Joko.Plugins.HocusFocus.AutoFocus.Replay;
 using NINA.Joko.Plugins.HocusFocus.Interfaces;
 using NINA.Joko.Plugins.HocusFocus.StarDetection;
 using NINA.Joko.Plugins.HocusFocus.StarDetection.Optimization;
@@ -20,6 +22,120 @@ public class StarDetectionOptionsTests {
         var store = new InMemoryPluginOptionsAccessor();
         var options = new StarDetectionOptions(profile, store);
         return (options, store, profile);
+    }
+
+    // ── MeasurementHotpixelRepair: the gating contract ──────────────────────────────────────────────
+    // It changes what Brightness Sensitivity and Min HFR mean, so it may only arrive with a deliberate
+    // re-derivation of those gates. These four tests are that contract.
+
+    /// <summary>
+    /// A store that looks like a profile this plugin has ALREADY loaded at least once. InitializeOptions seeds
+    /// defaults into a virgin profile, and it recognises a virgin one by the absence of IntermediateSavePath,
+    /// which its first run always writes. Tests that mean "an established profile" have to say so; a store with a
+    /// couple of hand-seeded keys and no IntermediateSavePath is a state no real profile can be in.
+    /// </summary>
+    private static InMemoryPluginOptionsAccessor ExistingProfileStore() {
+        var store = new InMemoryPluginOptionsAccessor();
+        store.SetValueString(nameof(StarDetectionOptions.IntermediateSavePath), @"C:\temp\HocusFocusIntermediate");
+        return store;
+    }
+
+    private static StarDetectionOptions BuildExisting(out InMemoryPluginOptionsAccessor store) {
+        store = ExistingProfileStore();
+        return new StarDetectionOptions(Substitute.For<IProfileService>(), store);
+    }
+
+    [Test]
+    public void MeasurementHotpixelRepair_IsOffForAnExistingConfiguration() {
+        var options = BuildExisting(out _);
+        Assert.That(options.MeasurementHotpixelRepair, Is.False);
+    }
+
+    [Test]
+    public void FreshInstall_SeedsDefaults_AndRecordsThatItDid() {
+        // A virgin profile applies defaults as its first action, so every value is written down explicitly
+        // rather than left implicit. That is what makes an exported profile portable.
+        var (options, store, _) = Build();
+        Assert.Multiple(() => {
+            Assert.That(options.MeasurementHotpixelRepair, Is.True, "a fresh install gets the current defaults");
+            Assert.That(options.PSFResolution, Is.EqualTo(20));
+            Assert.That(store.Snapshot.ContainsKey("SettingsInitialized"), Is.True, "and records that it seeded");
+            Assert.That(store.Snapshot.ContainsKey(nameof(StarDetectionOptions.PSFResolution)), Is.True,
+                "defaults are PERSISTED, not just held in memory");
+        });
+    }
+
+    [Test]
+    public void FreshInstall_PersistsEveryOptionItReads() {
+        // The seeding path writes an explicit list, and InitializeOptions reads one. If a new option is added to
+        // the read list and not the write list, a fresh install would leave it implicit -- the exact thing seeding
+        // exists to prevent -- and nothing else would notice. So compare the two lists rather than restate either.
+        var (_, store, _) = Build();
+        var readButNotPersisted = store.KeysRead
+            .Where(k => !store.Snapshot.ContainsKey(k))
+            .OrderBy(k => k, StringComparer.Ordinal)
+            .ToList();
+        Assert.That(readButNotPersisted, Is.Empty,
+            "every key InitializeOptions reads must also be written when seeding a fresh profile "
+            + "(add it to StarDetectionOptions.PersistAllSettings)");
+    }
+
+    [Test]
+    public void ExistingProfile_IsNotSeeded() {
+        var options = BuildExisting(out var store);
+        Assert.Multiple(() => {
+            Assert.That(options.MeasurementHotpixelRepair, Is.False);
+            Assert.That(store.Snapshot.ContainsKey(nameof(StarDetectionOptions.PSFResolution)), Is.False,
+                "an established profile must not have defaults written over it");
+        });
+    }
+
+    [Test]
+    public void MeasurementHotpixelRepair_IsOnAfterResetDefaults() {
+        var (options, store, _) = Build();
+        options.ResetDefaults();
+        Assert.Multiple(() => {
+            Assert.That(options.MeasurementHotpixelRepair, Is.True);
+            Assert.That(store.Snapshot[nameof(StarDetectionOptions.MeasurementHotpixelRepair)], Is.True);
+        });
+    }
+
+    [Test]
+    public void MeasurementHotpixelRepair_IsOnAfterApplyingAnOptimization() {
+        var options = BuildExisting(out _);
+        Assert.That(options.MeasurementHotpixelRepair, Is.False, "precondition");
+
+        options.ApplyOptimizedSettings(new OptimizedStarDetectionSettings {
+            BrightnessSensitivity = 11.0, StarClippingMultiplier = 2.0, NoiseClippingMultiplier = 4.0,
+            StarPeakResponse = 0.75, MaxDistortion = 0.5, MinHFR = 1.2, StarCenterTolerance = 0.3,
+            StructureLayers = 4, NoiseReductionRadius = 3, MinStarBoundingBoxSize = 5,
+            HotpixelThresholdingEnabled = true, HotpixelThreshold = 0.001
+        });
+
+        Assert.That(options.MeasurementHotpixelRepair, Is.True,
+            "an optimization lands its gate values against the current detector, so it adopts the repair too");
+    }
+
+    [Test]
+    public void MeasurementHotpixelRepair_StaysOffWhenImportingASnapshotThatPredatesIt() {
+        // A settings file written before the option existed deserializes to a snapshot whose property is false.
+        // Importing it must not turn the behaviour on, even though the snapshot carries optimized settings and
+        // ApplyOptimizedSettings would otherwise enable it.
+        var options = BuildExisting(out _);
+        options.ResetDefaults();
+        Assert.That(options.MeasurementHotpixelRepair, Is.True, "precondition");
+
+        // A legacy file carries every OTHER field; only this one is absent, which deserializes to false.
+        var (donor, _, _) = Build();
+        donor.ResetDefaults();
+        var legacy = StarDetectionSettingsSnapshot.FromOptions(donor);
+        legacy.MeasurementHotpixelRepair = false;
+        Assert.That(legacy.MinHFR, Is.GreaterThan(0), "the legacy snapshot must be otherwise well-formed");
+
+        options.ApplyImportedSnapshot(legacy);
+
+        Assert.That(options.MeasurementHotpixelRepair, Is.False,
+            "a file with no such property must never enable it");
     }
 
     [Test]
@@ -394,6 +510,10 @@ public class StarDetectionOptionsTests {
             Assert.That(fromDefault.PSFFitType, Is.EqualTo(fromOptions.PSFFitType));
             Assert.That(fromDefault.HotpixelFiltering, Is.EqualTo(fromOptions.HotpixelFiltering));
             Assert.That(fromDefault.HotpixelThresholdingEnabled, Is.EqualTo(fromOptions.HotpixelThresholdingEnabled));
+            // A construction over a blank accessor is a FRESH INSTALL, which seeds defaults, so the seed and it
+            // agree here. An ESTABLISHED profile is the one that carries the repair off — see
+            // MeasurementHotpixelRepair_IsOffForAnExistingConfiguration.
+            Assert.That(fromDefault.MeasurementHotpixelRepair, Is.EqualTo(fromOptions.MeasurementHotpixelRepair));
             // ---- F70: the ONE named exception, asserted in BOTH directions so either side moving fails loudly.
             // BuildDefaultStarDetectorParams carries the Typical preset's PRE-compensation base (3); every
             // constructed options object carries the +1 DerivePresetSettings adds when hotpixel thresholding and
@@ -451,6 +571,9 @@ public class StarDetectionOptionsTests {
     };
 
     private static void AssertStateEqualsFreshConstruction(StarDetectionOptions actual, string entryState) {
+        // A fresh construction over a blank accessor is a FRESH INSTALL, which seeds defaults, so this stays a
+        // plain equality: reset state and fresh-install state are one thing. The state that differs is an
+        // ESTABLISHED profile's, which ExistingProfileStore models.
         var (expected, _, _) = Build();
         var mismatches = new List<string>();
         foreach (var prop in typeof(StarDetectionOptions).GetProperties(BindingFlags.Public | BindingFlags.Instance)) {
@@ -748,12 +871,12 @@ public class StarDetectionOptionsTests {
 
         // The fall-back is observable through a profile already in Advanced mode: InitializeOptions reads the
         // useAdvanced FIELD before the derivation, so ConfigureSimpleSettings returns immediately.
-        var advancedStore = new InMemoryPluginOptionsAccessor();
+        var advancedStore = ExistingProfileStore();
         advancedStore.SetValueBoolean("UseAdvanced", true);
         var advanced = new StarDetectionOptions(profile, advancedStore);
 
         // The preset base is observable with the compensation's own input turned off.
-        var uncompensatedStore = new InMemoryPluginOptionsAccessor();
+        var uncompensatedStore = ExistingProfileStore();
         uncompensatedStore.SetValueBoolean(nameof(StarDetectionOptions.HotpixelThresholdingEnabled), false);
         var uncompensated = new StarDetectionOptions(profile, uncompensatedStore);
 

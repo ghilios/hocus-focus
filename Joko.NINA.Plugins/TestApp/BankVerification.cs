@@ -1,4 +1,4 @@
-#region "copyright"
+﻿#region "copyright"
 
 /*
     Copyright © 2021 - 2026 George Hilios <ghilios+NINA@googlemail.com>
@@ -218,10 +218,73 @@ namespace TestApp {
         /// The real bank has no such file at any level, so this is a silent no-op there — the entire point of
         /// keeping the synthetic-only knob out of the real bank's code path.
         /// </summary>
+        /// <summary>
+        /// The dataset's rendered ground truth, when the run is synthetic: the focuser position the renderer
+        /// placed best focus at, and the sensor tilt it rendered. The real bank has no such file, so this is
+        /// null there and every truth-scored column stays empty.
+        ///
+        /// <para>This is what turns the synthetic bank into an ABSOLUTE test rather than a self-consistency one:
+        /// the AF fit can be scored as |fitted best focus - truth| instead of only by its own sigma, and the
+        /// sensor model can be scored against a KNOWN tilt. Note the shipped bank renders every dataset with
+        /// zero tilt, so its sensor-model test is a null test (how much tilt is invented) rather than an
+        /// accuracy test.</para>
+        /// </summary>
+        public sealed class RenderedTruth {
+            public double? OptimalFocuserPosition { get; set; }
+            public double? TiltAngleDegrees { get; set; }
+            public double? TiltAmountMicrons { get; set; }
+            public double? FocuserStepSizeMicrons { get; set; }
+        }
+
+        /// <summary>Reads <see cref="RenderedTruth"/> from the same meta file, by the same upward walk.</summary>
+        public static RenderedTruth TryReadRenderedTruth(string frameDir, string bankRoot) {
+            var path = FindMetaFile(frameDir, bankRoot);
+            if (path == null) {
+                return null;
+            }
+            try {
+                var o = JObject.Parse(File.ReadAllText(path));
+                var rr = o["renderRequest"] as JObject;
+                if (rr == null) {
+                    return null;
+                }
+                double? Get(string key) {
+                    var v = rr[key];
+                    return v != null && v.Type != JTokenType.Null ? (double?)v : null;
+                }
+                return new RenderedTruth {
+                    OptimalFocuserPosition = Get("OptimalFocuserPosition"),
+                    TiltAngleDegrees = Get("TiltAngleDegrees"),
+                    TiltAmountMicrons = Get("TiltAmountMicrons"),
+                    FocuserStepSizeMicrons = Get("FocuserStepSizeMicrons")
+                };
+            } catch {
+                return null;
+            }
+        }
+
         /// <param name="frameDir">Directory holding the run's frames (NOT the frame file itself).</param>
         /// <param name="bankRoot">The bank root passed to <c>--runs</c>; the walk never looks above it.</param>
         /// <returns>The parsed <c>matchRadiusPx</c>, or null when no meta file was found or it had no such field.</returns>
         public static double? TryReadMatchRadiusPx(string frameDir, string bankRoot) {
+            var path = FindMetaFile(frameDir, bankRoot);
+            if (path == null) {
+                return null;
+            }
+            try {
+                var o = JObject.Parse(File.ReadAllText(path));
+                var v = o["matchRadiusPx"];
+                return v != null && v.Type != JTokenType.Null ? (double?)v : null;
+            } catch {
+                // Malformed sidecar: treat exactly like "absent" rather than aborting the run over a
+                // knob that has a well-defined fallback (CLI --match-radius / the 12px default).
+                return null;
+            }
+        }
+
+        /// <summary>The upward walk both readers share. Null when no meta file exists at or above
+        /// <paramref name="frameDir"/> (bounded by, and including, <paramref name="bankRoot"/>).</summary>
+        private static string FindMetaFile(string frameDir, string bankRoot) {
             if (string.IsNullOrWhiteSpace(frameDir)) {
                 return null;
             }
@@ -232,15 +295,7 @@ namespace TestApp {
             while (dir != null) {
                 var candidate = Path.Combine(dir, FileName);
                 if (File.Exists(candidate)) {
-                    try {
-                        var o = JObject.Parse(File.ReadAllText(candidate));
-                        var v = o["matchRadiusPx"];
-                        return v != null && v.Type != JTokenType.Null ? (double?)v : null;
-                    } catch {
-                        // Malformed sidecar: treat exactly like "absent" rather than aborting the run over a
-                        // knob that has a well-defined fallback (CLI --match-radius / the 12px default).
-                        return null;
-                    }
+                    return candidate;
                 }
                 var trimmed = dir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
                 if (rootFull != null && string.Equals(trimmed, rootFull, StringComparison.OrdinalIgnoreCase)) {

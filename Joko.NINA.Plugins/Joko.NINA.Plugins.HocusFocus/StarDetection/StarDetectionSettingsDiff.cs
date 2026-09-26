@@ -141,6 +141,7 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection {
             (nameof(IStarDetectionOptions.HotpixelThreshold), "Hotpixel Threshold"),
             (nameof(IStarDetectionOptions.SaturationThreshold), "Saturation Threshold"),
             (nameof(IStarDetectionOptions.ExcludeSaturatedStarsFromHFR), "Exclude Saturated Stars From HFR"),
+            (nameof(IStarDetectionOptions.MeasurementHotpixelRepair), "Measurement Hotpixel Repair"),
             (nameof(IStarDetectionOptions.MeasurementAverage), "Measurement Averaging"),
         };
 

@@ -1,4 +1,4 @@
-#region "copyright"
+﻿#region "copyright"
 
 /*
     Copyright © 2021 - 2026 George Hilios <ghilios+NINA@googlemail.com>
@@ -92,6 +92,130 @@ namespace NINA.Joko.Plugins.HocusFocus.Gpu {
             if (isHot) {
                 Atomic.Add(ref hotCount[0], 1L);
             }
+        }
+
+        // ---- isolated-hotpixel repair (measurement path) ------------------------------------------------
+
+        /// <summary>
+        /// Maps a pixel coordinate to the two neighbouring grid-block indices and the interpolation fraction
+        /// between their block centres. Mirrors HotpixelFiltering.ComputeGridWeights exactly.
+        /// </summary>
+        private static void GridWeights(int pixel, int blockSize, int gridExtent, out int low, out int high, out float frac) {
+            float g = (pixel + 0.5f) / blockSize - 0.5f;
+            if (g <= 0f) {
+                low = 0;
+                high = 0;
+                frac = 0f;
+                return;
+            }
+            int floor = (int)g;
+            if (floor >= gridExtent - 1) {
+                low = gridExtent - 1;
+                high = gridExtent - 1;
+                frac = 0f;
+                return;
+            }
+            low = floor;
+            high = floor + 1;
+            frac = g - floor;
+        }
+
+        private static float GridBilinear(ArrayView<float> gridValues, int rowLowBase, int rowHighBase, int colLow, int colHigh, float colFrac, float rowFrac) {
+            float topLeft = gridValues[rowLowBase + colLow];
+            float topRight = gridValues[rowLowBase + colHigh];
+            float bottomLeft = gridValues[rowHighBase + colLow];
+            float bottomRight = gridValues[rowHighBase + colHigh];
+            float top = topLeft + (topRight - topLeft) * colFrac;
+            float bottom = bottomLeft + (bottomRight - bottomLeft) * colFrac;
+            return top + (bottom - top) * rowFrac;
+        }
+
+        /// <summary>
+        /// Isolated-hotpixel repair for the MEASUREMENT image, mirroring
+        /// <c>HotpixelFiltering.RepairIsolatedHotpixels</c>: a pixel is repaired to its 3x3 median when its
+        /// amplitude above the interpolated local background exceeds
+        /// <c>HotpixelFiltering.IsolatedHotpixelSigmaMultiplier</c> local sigmas AND the brightest of its eight
+        /// neighbours sits below 1/<c>HotpixelFiltering.IsolatedHotpixelNeighborRatio</c> of that amplitude.
+        /// <paramref name="median"/> is the precomputed 3x3 median of <paramref name="src"/>;
+        /// <paramref name="dst"/> must NOT alias <paramref name="src"/>, since every test reads the unmodified
+        /// neighbourhood. The thresholds are compiled in from the CPU constants so the two paths cannot drift.
+        /// </summary>
+        public static void IsolatedHotpixelRepairKernel(
+            Index1D i,
+            ArrayView<float> src,
+            ArrayView<float> median,
+            ArrayView<float> gridMedian,
+            ArrayView<float> gridSigma,
+            ArrayView<float> dst,
+            ArrayView<long> repairedCount,
+            int width,
+            int height,
+            int blockSize) {
+            int y = i / width;
+            int x = i - y * width;
+            float v = src[i];
+            dst[i] = v;
+
+            int gridCols = (width + blockSize - 1) / blockSize;
+            int gridRows = (height + blockSize - 1) / blockSize;
+            GridWeights(x, blockSize, gridCols, out var colLow, out var colHigh, out var colFrac);
+            GridWeights(y, blockSize, gridRows, out var rowLow, out var rowHigh, out var rowFrac);
+            int rowLowBase = rowLow * gridCols;
+            int rowHighBase = rowHigh * gridCols;
+
+            float bg = GridBilinear(gridMedian, rowLowBase, rowHighBase, colLow, colHigh, colFrac, rowFrac);
+            float amplitude = v - bg;
+            if (amplitude <= 0f) {
+                return;
+            }
+            float sigma = GridBilinear(gridSigma, rowLowBase, rowHighBase, colLow, colHigh, colFrac, rowFrac);
+            if (amplitude <= Utility.HotpixelFiltering.IsolatedHotpixelSigmaMultiplier * sigma) {
+                return;
+            }
+
+            int xm = Clamp(x - 1, 0, width - 1);
+            int xp = Clamp(x + 1, 0, width - 1);
+            int ym = Clamp(y - 1, 0, height - 1);
+            int yp = Clamp(y + 1, 0, height - 1);
+
+            float n0 = src[ym * width + xm];
+            float n1 = src[ym * width + x];
+            float n2 = src[ym * width + xp];
+            float n3 = src[y * width + xm];
+            float n4 = src[y * width + xp];
+            float n5 = src[yp * width + xm];
+            float n6 = src[yp * width + x];
+            float n7 = src[yp * width + xp];
+
+            // Border pixels have fewer than eight neighbours, and BORDER_REPLICATE maps some of the missing ones
+            // back onto the pixel itself; those must not count (mirrors HotpixelFiltering.MaxNeighbor).
+            bool hasLeft = xm != x, hasRight = xp != x, hasAbove = ym != y, hasBelow = yp != y;
+            float maxNeighbor = float.NegativeInfinity;
+            if (hasAbove) {
+                if (hasLeft) maxNeighbor = Math.Max(maxNeighbor, n0);
+                maxNeighbor = Math.Max(maxNeighbor, n1);
+                if (hasRight) maxNeighbor = Math.Max(maxNeighbor, n2);
+            }
+            if (hasLeft) maxNeighbor = Math.Max(maxNeighbor, n3);
+            if (hasRight) maxNeighbor = Math.Max(maxNeighbor, n4);
+            if (hasBelow) {
+                if (hasLeft) maxNeighbor = Math.Max(maxNeighbor, n5);
+                maxNeighbor = Math.Max(maxNeighbor, n6);
+                if (hasRight) maxNeighbor = Math.Max(maxNeighbor, n7);
+            }
+            if ((maxNeighbor - bg) * Utility.HotpixelFiltering.IsolatedHotpixelNeighborRatio >= amplitude) {
+                return;
+            }
+
+            // Nothing to pull down. Not reachable for a genuine isolated spike (its own value is the window
+            // maximum), but it keeps the count honest rather than tallying a no-op write.
+            float repairValue = median[i];
+            if (repairValue >= v) {
+                return;
+            }
+
+            dst[i] = repairValue;
+            Atomic.Add(ref repairedCount[0], 1L);
         }
 
         // ---- separable convolution (BORDER_REFLECT), generic taps ---------------------------------------

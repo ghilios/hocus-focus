@@ -1,4 +1,4 @@
-using NINA.Joko.Plugins.HocusFocus.Interfaces;
+﻿using NINA.Joko.Plugins.HocusFocus.Interfaces;
 using NINA.Joko.Plugins.HocusFocus.StarDetection;
 using NINA.Joko.Plugins.HocusFocus.Tests.Synthetic;
 using NINA.Joko.Plugins.HocusFocus.Utility;
@@ -148,6 +148,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Tests.StarDetection {
             sb.Append("OutsideROI=").AppendLine(m.OutsideROI.ToString(CultureInfo.InvariantCulture));
             sb.Append("SaturatedPixelCount=").AppendLine(m.SaturatedPixelCount.ToString(CultureInfo.InvariantCulture));
             sb.Append("HotpixelCount=").AppendLine(m.HotpixelCount.ToString(CultureInfo.InvariantCulture));
+            sb.Append("MeasurementHotpixelCount=").AppendLine(m.MeasurementHotpixelCount.ToString(CultureInfo.InvariantCulture));
             sb.Append("RelaxationAdmittedCount=").AppendLine(m.RelaxationAdmittedCount.ToString(CultureInfo.InvariantCulture));
 
             // Bounds lists (sorted Y-then-X by top-left corner)

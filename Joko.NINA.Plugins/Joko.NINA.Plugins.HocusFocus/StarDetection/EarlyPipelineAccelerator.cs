@@ -1,4 +1,4 @@
-#region "copyright"
+﻿#region "copyright"
 
 /*
     Copyright © 2021 - 2026 George Hilios <ghilios+NINA@googlemail.com>
@@ -42,6 +42,15 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection {
         public CvImageUtility.LocalBackgroundGrid AdaptiveMedianGrid { get; set; }
         public double StructureMapMedian { get; set; }
         public long HotpixelCount { get; set; }
+
+        /// <summary>Isolated hot pixels repaired on the measurement image (the measurement-path filter).</summary>
+        public long MeasurementHotpixelCount { get; set; }
+
+        /// <summary>
+        /// True when the span left the measurement image and the structure source holding different pixels, so
+        /// <see cref="MeasurementNoise"/> is its own estimate rather than a copy of <see cref="StructureNoise"/>.
+        /// </summary>
+        public bool MeasurementDiffersFromStructure { get; set; }
     }
 
     /// <summary>
@@ -58,7 +67,10 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection {
         /// which case the caller runs the existing CPU span with no behavior change.
         /// <paramref name="token"/> is honored while queued for a device working set; a device build already
         /// in flight is not interrupted.
+        /// <paramref name="structureSource"/> is a pre-built structure source (the binning hoist has to split
+        /// the measurement and structure images at native resolution and bin both), or null to derive one from
+        /// <paramref name="srcImage"/>.
         /// </summary>
-        bool TryRunEarlySpan(Mat srcImage, StarDetectorParams p, int effectiveStructureLayers, bool hotpixelAlreadyApplied, CancellationToken token, out EarlySpanOutput output);
+        bool TryRunEarlySpan(Mat srcImage, StarDetectorParams p, int effectiveStructureLayers, bool hotpixelAlreadyApplied, Mat structureSource, CancellationToken token, out EarlySpanOutput output);
     }
 }

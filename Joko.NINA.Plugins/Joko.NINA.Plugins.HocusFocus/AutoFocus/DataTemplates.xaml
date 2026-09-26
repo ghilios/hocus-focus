@@ -77,7 +77,7 @@
     <TextBlock x:Key="SDR_OnBorder_Tooltip" Text="Candidates rejected because they touched the edge of the image or detection region." />
     <TextBlock x:Key="SDR_TooDistorted_Tooltip" Text="Candidates rejected because too little of their bounding box was filled — the shape was too irregular to be a reliable star." />
     <TextBlock x:Key="SDR_Degenerate_Tooltip" Text="Candidates rejected because their pixels were too uniform to compute reliable star parameters (this happens most often near the image border)." />
-    <TextBlock x:Key="SDR_Saturated_Tooltip" Text="Stars containing saturated (clipped) pixels. These are not rejected — their saturated pixels are masked during PSF fitting." />
+    <TextBlock x:Key="SDR_Saturated_Tooltip" Text="Stars containing saturated (clipped) pixels. These are not rejected, but they get no PSF model: a clipped core leaves the fit with wings only, which cannot determine the star's width. They are still measured for HFR." />
     <TextBlock x:Key="SDR_LowSensitivity_Tooltip" Text="Candidates rejected for being too faint relative to the background noise to measure reliably." />
     <TextBlock x:Key="SDR_NotCentered_Tooltip" Text="Candidates rejected because their measured centroid was too far from the center of the bounding box." />
     <TextBlock x:Key="SDR_TooFlat_Tooltip" Text="Candidates rejected because their profile was too flat — the median was too close to the peak to be a real, peaked star." />
@@ -86,7 +86,8 @@
     <TextBlock x:Key="SDR_OutsideROI_Tooltip" Text="Candidates rejected because they fell outside the configured region of interest." />
     <TextBlock x:Key="SDR_PSFFailed_Tooltip" Text="Stars whose PSF model fit failed or did not meet the R² goodness-of-fit threshold." />
     <TextBlock x:Key="SDR_SaturatedPixels_Tooltip" Text="The total number of saturated (clipped) pixels encountered across all detected stars." />
-    <TextBlock x:Key="SDR_Hotpixels_Tooltip" Text="The number of hot pixels identified and filtered out during detection." />
+    <TextBlock x:Key="SDR_Hotpixels_Tooltip" Text="The number of hot pixels identified and filtered out of the structure (detection) image." />
+    <TextBlock x:Key="SDR_MeasurementHotpixels_Tooltip" Text="The number of isolated hot pixels repaired on the measurement image — the one HFR and the PSF model are measured from. Only a pixel that stands well above the local background while its neighbours do not is repaired, so star cores are left intact." />
     <TextBlock x:Key="SDR_Contaminated_Tooltip" Text="Stars flagged as contaminated by a localized neighbor or hot column (after the smooth local background gradient is removed). With 'Reject Contaminated Stars' enabled they are rejected; otherwise they are kept and only flagged." />
     <TextBlock x:Key="SDR_TooElongated_Tooltip" Text="Candidates rejected as diffraction spikes or satellite/aircraft trails because their shape was too linear (high eccentricity). Only active when Defocus-Aware Donut Detection and the streak gate are enabled." />
     <TextBlock x:Key="SDR_BloomSuppressed_Tooltip" Text="Candidates rejected because they fell within the saturation bloom radius of a bright saturated star (halo/bloom fragments). Only active when Defocus-Aware Donut Detection and a bloom radius are enabled." />
@@ -1182,6 +1183,21 @@
                                     VerticalAlignment="Center"
                                     Text="{Binding Metrics.RelaxationAdmittedCount, Converter={StaticResource HF_ZeroToDoubleDashConverter}}" />
                             </StackPanel>
+                        </UniformGrid>
+                        <UniformGrid Columns="2">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock
+                                    Width="120"
+                                    VerticalAlignment="Center"
+                                    Text="Repaired Hotpixels"
+                                    ToolTip="{StaticResource SDR_MeasurementHotpixels_Tooltip}" />
+                                <TextBlock
+                                    Width="70"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Text="{Binding Metrics.MeasurementHotpixelCount, Converter={StaticResource HF_ZeroToDoubleDashConverter}}" />
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" />
                         </UniformGrid>
                     </StackPanel>
                 </GroupBox>

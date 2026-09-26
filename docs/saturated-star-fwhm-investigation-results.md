@@ -10,6 +10,16 @@ but *also* a much larger FWHM (not expected — a fitted model width should be b
 
 All numbers are from this one frame.
 
+> **Status: recommendations 3, 4 and 5 are implemented.** `PSFResolution = 20` and `UsePSFAbsoluteDeviation = true`
+> are the shipped defaults, saturated stars get no PSF fit, and the measurement image is repaired with an isolation
+> test while the structure path keeps its median. Measured before/after results, including a consequence this
+> investigation did not anticipate (the honest measurement sigma makes the `Sensitivity` gate bite harder), are in
+> `docs/saturated-star-fwhm-fixes-results.md`. Recommendations 1 and 2 are rig work and remain open.
+>
+> One correction to the *Reproducing* section below: `--settings` needs a HARNESS settings file. Handing the
+> runners the plugin's own `O_settings.json` export produces an empty option bag and a run at stock defaults
+> (1615 detections, not 1737) with no error. `TestApp convert-settings` now does the conversion.
+
 ## Summary
 
 - **The saturated star's FWHM (6.06 px vs 3.8-4.1 px for its neighbours).** Its PSF is identical to its

@@ -153,6 +153,15 @@ namespace NINA.Joko.Plugins.HocusFocus.Interfaces {
         double HotpixelThreshold { get; set; }
         double SaturationThreshold { get; set; }
         bool ExcludeSaturatedStarsFromHFR { get; set; }
+
+        /// <summary>
+        /// Repair only ISOLATED hot pixels on the measurement image (the image HFR and the PSF are measured from)
+        /// instead of running the structure path's 3x3 median over it. Keeps star cores intact, and makes that
+        /// image's noise estimate honest rather than median-suppressed, which makes Brightness Sensitivity and
+        /// Min HFR effectively stricter at the same numbers. OFF for any configuration that predates it; turned
+        /// ON by Restore Defaults and by applying an optimization, both of which re-derive the gates alongside it.
+        /// </summary>
+        bool MeasurementHotpixelRepair { get; set; }
         MeasurementAverageEnum MeasurementAverage { get; set; }
         bool PSFPixelIntegration { get; set; }
 

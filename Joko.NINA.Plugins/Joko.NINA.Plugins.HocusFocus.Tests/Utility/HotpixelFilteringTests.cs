@@ -1,7 +1,9 @@
-using NINA.Core.Enum;
+﻿using NINA.Core.Enum;
 using NINA.Joko.Plugins.HocusFocus.Utility;
 using NUnit.Framework;
 using OpenCvSharp;
+using System.Linq;
+using System.Runtime.InteropServices;
 using Size = OpenCvSharp.Size;
 
 namespace NINA.Joko.Plugins.HocusFocus.Tests.Utility {
@@ -98,5 +100,144 @@ namespace NINA.Joko.Plugins.HocusFocus.Tests.Utility {
             Assert.Throws<Accord.Imaging.InvalidImagePropertiesException>(() =>
                 HotpixelFiltering.CFAHotpixelFilter(raw, SensorType.Monochrome, threshold: 100));
         }
-    }
+    
+        // ---- isolated-hotpixel repair (measurement path) --------------------------------------------------
+
+        /// <summary>
+        /// A noisy flat field, so the local-sigma grid has a realistic value to threshold against. Deterministic
+        /// (fixed seed) so the tests below are not flaky.
+        /// </summary>
+        private static Mat NoisyBackground(int width, int height, float level, float sigma, int seed = 1234) {
+            var rng = new System.Random(seed);
+            var mat = new Mat(new Size(width, height), MatType.CV_32F);
+            var data = new float[width * height];
+            for (int i = 0; i < data.Length; ++i) {
+                // Box-Muller, so the MAD-derived sigma of the grid matches `sigma`.
+                double u1 = 1.0 - rng.NextDouble();
+                double u2 = rng.NextDouble();
+                data[i] = level + sigma * (float)(System.Math.Sqrt(-2.0 * System.Math.Log(u1)) * System.Math.Cos(2.0 * System.Math.PI * u2));
+            }
+            Marshal.Copy(data.Select(v => v).ToArray(), 0, mat.Data, data.Length);
+            return mat;
+        }
+
+        private static void PlantGaussianStar(Mat mat, int cx, int cy, float amplitude, double fwhm) {
+            double sigma = fwhm / (2.0 * System.Math.Sqrt(2.0 * System.Math.Log(2.0)));
+            int radius = (int)System.Math.Ceiling(3.0 * sigma) + 1;
+            for (int dy = -radius; dy <= radius; ++dy) {
+                for (int dx = -radius; dx <= radius; ++dx) {
+                    int x = cx + dx, y = cy + dy;
+                    if (x < 0 || y < 0 || x >= mat.Cols || y >= mat.Rows) {
+                        continue;
+                    }
+                    var add = amplitude * (float)System.Math.Exp(-(dx * dx + dy * dy) / (2.0 * sigma * sigma));
+                    mat.Set(y, x, mat.At<float>(y, x) + add);
+                }
+            }
+        }
+
+        [Test]
+        public void RepairIsolatedHotpixels_RepairsAnIsolatedSpike() {
+            using var mat = NoisyBackground(256, 256, level: 0.10f, sigma: 0.001f);
+            var neighborhoodBefore = mat.At<float>(128, 129);
+            mat.Set(128, 128, 0.9f);
+
+            var repaired = HotpixelFiltering.RepairIsolatedHotpixels(mat);
+
+            Assert.Multiple(() => {
+                Assert.That(repaired, Is.EqualTo(1L), "exactly the planted spike should be repaired");
+                Assert.That(mat.At<float>(128, 128), Is.EqualTo(0.10f).Within(0.01f), "the spike should be replaced by its local median");
+                Assert.That(mat.At<float>(128, 129), Is.EqualTo(neighborhoodBefore), "neighbours must be left untouched");
+            });
+        }
+
+        [Test]
+        public void RepairIsolatedHotpixels_LeavesAWellSampledStarCoreAlone() {
+            using var mat = NoisyBackground(256, 256, level: 0.10f, sigma: 0.001f);
+            PlantGaussianStar(mat, 128, 128, amplitude: 0.5f, fwhm: 4.0);
+            var peakBefore = mat.At<float>(128, 128);
+
+            var repaired = HotpixelFiltering.RepairIsolatedHotpixels(mat);
+
+            Assert.Multiple(() => {
+                Assert.That(repaired, Is.EqualTo(0L), "a real star has bright neighbours and must fail the isolation test");
+                Assert.That(mat.At<float>(128, 128), Is.EqualTo(peakBefore), "the star's peak must survive intact");
+            });
+        }
+
+        [Test]
+        public void RepairIsolatedHotpixels_LeavesASubThresholdSpikeAlone() {
+            using var mat = NoisyBackground(256, 256, level: 0.10f, sigma: 0.001f);
+            // 3 sigma above background: isolated, but not significant enough to be called a hot pixel.
+            mat.Set(128, 128, 0.103f);
+            var before = mat.At<float>(128, 128);
+
+            var repaired = HotpixelFiltering.RepairIsolatedHotpixels(mat);
+
+            Assert.Multiple(() => {
+                Assert.That(repaired, Is.EqualTo(0L));
+                Assert.That(mat.At<float>(128, 128), Is.EqualTo(before));
+            });
+        }
+
+        [Test]
+        public void RepairIsolatedHotpixels_RepairsEveryPlantedSpikeIncludingBorders() {
+            using var mat = NoisyBackground(256, 256, level: 0.10f, sigma: 0.001f);
+            // Corners, edges and interior: BORDER_REPLICATE duplicates a corner pixel four times in its own 3x3
+            // window, which still leaves the median on a background value, so a corner spike is repairable too.
+            var spikes = new[] { (0, 0), (255, 0), (0, 255), (255, 255), (128, 0), (0, 128), (40, 200), (200, 40) };
+            foreach (var (x, y) in spikes) {
+                mat.Set(y, x, 0.9f);
+            }
+
+            var repaired = HotpixelFiltering.RepairIsolatedHotpixels(mat);
+
+            Assert.Multiple(() => {
+                Assert.That(repaired, Is.EqualTo((long)spikes.Length));
+                foreach (var (x, y) in spikes) {
+                    Assert.That(mat.At<float>(y, x), Is.EqualTo(0.10f).Within(0.01f), $"spike at {x},{y}");
+                }
+            });
+        }
+
+        [Test]
+        public void RepairIsolatedHotpixels_IsUnaffectedByAStrongBackgroundGradient() {
+            using var mat = NoisyBackground(512, 512, level: 0.0f, sigma: 0.001f);
+            // A gradient far larger than the noise: a fixed global background would swamp the test, the
+            // interpolated local grid must not.
+            for (int y = 0; y < mat.Rows; ++y) {
+                for (int x = 0; x < mat.Cols; ++x) {
+                    mat.Set(y, x, mat.At<float>(y, x) + 0.05f + 0.4f * x / mat.Cols);
+                }
+            }
+            mat.Set(300, 400, 0.95f);
+
+            var repaired = HotpixelFiltering.RepairIsolatedHotpixels(mat);
+
+            Assert.That(repaired, Is.EqualTo(1L));
+        }
+
+        [Test]
+        public void RepairIsolatedHotpixels_RejectsANonFloatMat() {
+            using var mat = new Mat(new Size(16, 16), MatType.CV_16UC1, new Scalar(100));
+            Assert.Throws<System.ArgumentException>(() => HotpixelFiltering.RepairIsolatedHotpixels(mat));
+        }
+
+        [Test]
+        public void RepairIsolatedHotpixels_IsDeterministic() {
+            using var first = NoisyBackground(256, 256, level: 0.10f, sigma: 0.002f);
+            using var second = first.Clone();
+
+            var a = HotpixelFiltering.RepairIsolatedHotpixels(first);
+            var b = HotpixelFiltering.RepairIsolatedHotpixels(second);
+
+            using var diff = new Mat();
+            Cv2.Absdiff(first, second, diff);
+            Cv2.MinMaxLoc(diff, out _, out double maxDiff);
+            Assert.Multiple(() => {
+                Assert.That(b, Is.EqualTo(a));
+                Assert.That(maxDiff, Is.EqualTo(0.0));
+            });
+        }
+}
 }

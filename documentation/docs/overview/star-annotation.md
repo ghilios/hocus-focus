@@ -87,7 +87,7 @@ The detector records, per frame, the bounding boxes of candidates it threw out a
 |---|---|---|
 | Show Distorted | Green, 50% | *"Whether to show the failed stars that were too distorted"*. Candidates whose box-fill / aspect ratio failed the distortion gate. (The gate/reason is "Too Distorted", but the toggle is **Show Distorted**.) |
 | Show Degenerate | Green, 50% | *"Whether to show the failed degenerate stars"*. Too few pixels or too little contrast to fit. |
-| Show Saturated | Green, 50% | *"Whether to show the partially-saturated stars that were processed with masked pixels"*. Grouped here with rejection diagnostics, but saturated stars are **kept** (measured with their saturated pixels masked during PSF fitting), not rejected. |
+| Show Saturated | Green, 50% | *"Whether to show the partially-saturated stars that were processed with masked pixels"*. Grouped here with rejection diagnostics, but saturated stars are **kept**, not rejected. They keep their position and HFR; only the PSF model is skipped, because a clipped core cannot pin down a width. |
 | Show Low Sensitivity | Green, 50% | *"Whether to show the failed low sensitivity stars"*. Signal too weak relative to background and noise. |
 | Show Not Centered | Green, 50% | *"Whether to show the failed not centered stars"*. Centroid fell outside the centering tolerance. |
 | Show Too Flat | Green, 50% | *"Whether to show the failed too flat stars"*. Peak too close to the local background. |
