@@ -361,14 +361,14 @@ public class OptimizationSummaryTests {
     /// </summary>
     [Test]
     public void HasUndersampledStars_FiresWhenTheVertexIsAtOrBelowTheGate() {
-        var s = new OptimizationSummary { MeasuredInFocusHfr = 0.762, VariantMinHfr = 1.2, RunDetectionBinning = 1 };
+        var s = new OptimizationSummary { FitVertexInFocusHfr = 0.762, VariantMinHfr = 1.2, RunDetectionBinning = 1 };
         Assert.That(s.HasUndersampledStars, Is.True);
     }
 
     /// <summary>D05_tec140_1000mm, the control: vertex 1.804 px, well clear of the gate. Must stay silent.</summary>
     [Test]
     public void HasUndersampledStars_StaysSilentOnAWellSampledRig() {
-        var s = new OptimizationSummary { MeasuredInFocusHfr = 1.804, VariantMinHfr = 1.2, RunDetectionBinning = 1 };
+        var s = new OptimizationSummary { FitVertexInFocusHfr = 1.804, VariantMinHfr = 1.2, RunDetectionBinning = 1 };
         Assert.That(s.HasUndersampledStars, Is.False);
     }
 
@@ -379,8 +379,8 @@ public class OptimizationSummaryTests {
     /// </summary>
     [Test]
     public void HasUndersampledStars_ConvertsCapturedPixelsIntoTheGatesBinnedSpace() {
-        var unbinned = new OptimizationSummary { MeasuredInFocusHfr = 2.2, VariantMinHfr = 1.2, RunDetectionBinning = 1 };
-        var binned = new OptimizationSummary { MeasuredInFocusHfr = 2.2, VariantMinHfr = 1.2, RunDetectionBinning = 2 };
+        var unbinned = new OptimizationSummary { FitVertexInFocusHfr = 2.2, VariantMinHfr = 1.2, RunDetectionBinning = 1 };
+        var binned = new OptimizationSummary { FitVertexInFocusHfr = 2.2, VariantMinHfr = 1.2, RunDetectionBinning = 2 };
         Assert.Multiple(() => {
             Assert.That(unbinned.HasUndersampledStars, Is.False, "2.2 px clears a 1.2 px gate at 1x1");
             Assert.That(binned.HasUndersampledStars, Is.True, "the same 2.2 px is 1.1 binned px at 2x2");
@@ -395,7 +395,7 @@ public class OptimizationSummaryTests {
     public void HasUndersampledStars_StaysSilentWithoutAMeasurement() {
         Assert.Multiple(() => {
             Assert.That(new OptimizationSummary().HasUndersampledStars, Is.False);
-            Assert.That(new OptimizationSummary { MeasuredInFocusHfr = 0.5 }.HasUndersampledStars, Is.False);
+            Assert.That(new OptimizationSummary { FitVertexInFocusHfr = 0.5 }.HasUndersampledStars, Is.False);
             Assert.That(new OptimizationSummary { VariantMinHfr = 1.2 }.HasUndersampledStars, Is.False);
         });
     }
@@ -408,10 +408,10 @@ public class OptimizationSummaryTests {
     [Test]
     public void HasUndersampledStars_FollowsTheVariantsOwnGate() {
         var optimizedClears = new OptimizationSummary {
-            MeasuredInFocusHfr = 1.5, VariantMinHfr = 1.2, BaselineMinHfr = 3.0, RunDetectionBinning = 1
+            FitVertexInFocusHfr = 1.5, VariantMinHfr = 1.2, BaselineMinHfr = 3.0, RunDetectionBinning = 1
         };
         var currentDoesNot = new OptimizationSummary {
-            MeasuredInFocusHfr = 1.5, VariantMinHfr = 3.0, BaselineMinHfr = 3.0, RunDetectionBinning = 1
+            FitVertexInFocusHfr = 1.5, VariantMinHfr = 3.0, BaselineMinHfr = 3.0, RunDetectionBinning = 1
         };
         Assert.Multiple(() => {
             Assert.That(optimizedClears.HasUndersampledStars, Is.False);
