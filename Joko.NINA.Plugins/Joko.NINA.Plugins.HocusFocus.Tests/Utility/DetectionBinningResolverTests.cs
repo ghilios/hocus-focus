@@ -246,5 +246,69 @@ namespace NINA.Joko.Plugins.HocusFocus.Tests.Utility {
                 Assert.That(p.PixelScale, Is.EqualTo(0.28).Within(1e-12));
             });
         }
+
+        // The reported oscillation, as a test. Both writers' values for the TinkerBolts rig
+        // (AutoFocus_20260929_040614) must agree on the factor the user is already running.
+        [Test]
+        public void RecommendFromHfr_WithCurrentFactor_HoldsAcrossTheReportedWriterDisagreement() {
+            Assert.Multiple(() => {
+                // auto-focus engine's FinalHFR, and the wizard's post-fix measured point
+                Assert.That(DetectionBinningResolver.RecommendFromHfr(4.662, 2), Is.EqualTo(2));
+                Assert.That(DetectionBinningResolver.RecommendFromHfr(4.4363, 2), Is.EqualTo(2));
+                // and a user on 1x1 is held there by the same pair, rather than bounced
+                Assert.That(DetectionBinningResolver.RecommendFromHfr(4.662, 1), Is.EqualTo(1));
+                Assert.That(DetectionBinningResolver.RecommendFromHfr(4.4363, 1), Is.EqualTo(1));
+            });
+        }
+
+        // The hold boundaries are the whole cost of the margin, so they are pinned explicitly rather than
+        // left implied by the constant. Band for factor c is [3c-1.5, 3c+1.5); the hold zone widens it by
+        // HysteresisPixels on each side.
+        [TestCase(1, 5.09, 1)]   // just inside 1x1's hold zone (upper edge 5.1)
+        [TestCase(1, 5.11, 2)]   // just outside it -> move
+        [TestCase(2, 3.91, 2)]   // just inside 2x2's hold zone (lower edge 3.9)
+        [TestCase(2, 3.89, 1)]   // just outside it -> move
+        [TestCase(2, 8.09, 2)]   // upper edge 8.1
+        [TestCase(2, 8.11, 3)]
+        [TestCase(3, 6.91, 3)]   // lower edge 6.9
+        [TestCase(3, 6.89, 2)]   // just outside 3x3's hold zone -> move
+        [TestCase(3, 11.09, 3)]  // upper edge 11.1
+        [TestCase(3, 11.11, 4)]
+        [TestCase(4, 9.91, 4)]   // lower edge 9.9
+        [TestCase(4, 9.89, 3)]
+        public void RecommendFromHfr_WithCurrentFactor_HoldsInsideTheZoneAndMovesOutsideIt(
+            int currentFactor, double hfr, int expected) {
+            Assert.That(DetectionBinningResolver.RecommendFromHfr(hfr, currentFactor), Is.EqualTo(expected));
+        }
+
+        // Once it does move, it moves to the RIGHT factor, not one step toward it.
+        [Test]
+        public void RecommendFromHfr_WithCurrentFactor_JumpsStraightToTheIndicatedFactor() {
+            Assert.That(DetectionBinningResolver.RecommendFromHfr(11.0, 1), Is.EqualTo(4));
+        }
+
+        [Test]
+        public void RecommendFromHfr_WithCurrentFactor_ClampsTheCurrentFactorAndHandlesDegenerateInput() {
+            Assert.Multiple(() => {
+                Assert.That(DetectionBinningResolver.RecommendFromHfr(4.662, 0), Is.EqualTo(1),
+                    "current 0 clamps to 1, whose hold zone reaches 5.1");
+                Assert.That(DetectionBinningResolver.RecommendFromHfr(4.662, 99), Is.EqualTo(2),
+                    "current 99 clamps to 4, whose hold zone starts at 9.9, so the raw answer stands");
+                Assert.That(DetectionBinningResolver.RecommendFromHfr(double.NaN, 2), Is.EqualTo(1));
+                Assert.That(DetectionBinningResolver.RecommendFromHfr(0.0, 2), Is.EqualTo(1));
+                Assert.That(DetectionBinningResolver.RecommendFromHfr(-3.0, 2), Is.EqualTo(1));
+            });
+        }
+
+        // The pure form is what HarnessSettingsStore derives a dataset's factor from, where there is no
+        // "current factor" to latch against. It must stay hysteresis-free.
+        [Test]
+        public void RecommendFromHfr_SingleArgument_IsUnaffectedByTheHysteresis() {
+            Assert.Multiple(() => {
+                Assert.That(DetectionBinningResolver.RecommendFromHfr(4.4), Is.EqualTo(1));
+                Assert.That(DetectionBinningResolver.RecommendFromHfr(4.6), Is.EqualTo(2));
+                Assert.That(DetectionBinningResolver.RecommendFromHfr(4.662), Is.EqualTo(2));
+            });
+        }
     }
 }

@@ -61,6 +61,29 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
         /// <summary>The largest factor the recommendation will suggest (and the largest the options UI offers).</summary>
         public const int MaxBinningFactor = 4;
 
+        /// <summary>
+        /// Half-width, in captured pixels, of the NO-CHANGE zone straddling each band boundary. Inside it the
+        /// recommendation holds whatever factor is already in service instead of naming the other one.
+        ///
+        /// <para>The comparator had no margin at all, and the quantity it reads moves by more than the
+        /// distance to a boundary for perfectly ordinary reasons: two different code paths publish the
+        /// measurement and disagree by 0.23 px even after they were unified on statistic type, the same
+        /// frames measure 0.44 px apart at 1x1 versus 2x2, and four subs at one position scatter ~0.1 px.
+        /// A rig whose in-focus HFR lands near 4.5 / 7.5 / 10.5 px therefore got a different answer every
+        /// run. 0.6 px covers all three with headroom. See
+        /// docs/binning-recommendation-oscillation-design.md.</para>
+        ///
+        /// <para>FIXED pixels, not a fraction of the boundary: every band is exactly
+        /// <see cref="TargetHfrPixels"/> wide at every factor, so a fractional margin would be wider at 10.5
+        /// px than at 4.5 px for no reason.</para>
+        ///
+        /// <para>The cost is stated plainly: a user on a genuinely wrong factor is told to move 0.6 px later
+        /// than before. That is the right trade here, because within this zone BOTH factors land inside the
+        /// detector's calibrated 2-4 px band, so there is no correct answer to converge on — which is
+        /// precisely when a latching comparator is the right instrument.</para>
+        /// </summary>
+        public const double HysteresisPixels = 0.6;
+
         /// <summary>The integer factor for <paramref name="setting"/>, clamped to the supported range.</summary>
         public static int ToFactor(DetectionBinningEnum setting) => Clamp((int)setting);
 
@@ -75,6 +98,34 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
             }
             var raw = measuredHfrPixels / TargetHfrPixels;
             return Clamp((int)Math.Round(raw, MidpointRounding.AwayFromZero));
+        }
+
+        /// <summary>
+        /// The factor to recommend to someone ALREADY RUNNING <paramref name="currentFactor"/>: the same answer
+        /// as <see cref="RecommendFromHfr(double)"/>, except that it holds the current factor while the
+        /// measurement is still within <see cref="HysteresisPixels"/> of that factor's own band.
+        ///
+        /// <para>This makes the recommendation PATH-DEPENDENT on purpose — two rigs with identical
+        /// measurements and different current factors are told different things. Deliberate: see
+        /// <see cref="HysteresisPixels"/>. Callers that have no factor in service (deriving one from scratch,
+        /// e.g. the headless harness) must use the single-argument form, which stays hysteresis-free.</para>
+        ///
+        /// <para>When the measurement DOES clear the zone, this returns the factor the measurement actually
+        /// indicates rather than stepping one toward it: a 1x1 rig measuring 11 px needs 4x4, not 2x2.</para>
+        /// </summary>
+        public static int RecommendFromHfr(double measuredHfrPixels, int currentFactor) {
+            if (!IsUsableHfr(measuredHfrPixels)) {
+                return 1;
+            }
+            var current = Clamp(currentFactor);
+            var raw = RecommendFromHfr(measuredHfrPixels);
+            if (raw == current) {
+                return current;
+            }
+            var halfBand = 0.5 * TargetHfrPixels;
+            var lower = TargetHfrPixels * current - halfBand - HysteresisPixels;
+            var upper = TargetHfrPixels * current + halfBand + HysteresisPixels;
+            return measuredHfrPixels >= lower && measuredHfrPixels < upper ? current : raw;
         }
 
         /// <summary>The <see cref="DetectionBinningEnum"/> member for a factor.</summary>
