@@ -51,8 +51,9 @@ The recommendation is advisory; nothing enforces it.
 
 It is **measured, not estimated**. The number is the final HFR of your last auto-focus run: a real exposure
 taken at the focuser position the run settled on. Accepting a live sweep in the
-[Optimization Wizard](../optimization/index.md) updates it too, from the sweep's fitted curve. The factor is
-then whichever brings that measurement closest to 3 px:
+[Optimization Wizard](../optimization/index.md) updates it too, from the sweep frames measured at the
+position nearest best focus — the same kind of number, so the two sources agree. The factor is then whichever
+brings that measurement closest to 3 px:
 
 | Measured in-focus HFR | Recommended |
 |---|---|
@@ -60,6 +61,12 @@ then whichever brings that measurement closest to 3 px:
 | 4.5 to 7.5 px | 2x2 |
 | 7.5 to 10.5 px | 3x3 |
 | 10.5 px and above | 4x4 |
+
+Those boundaries decide what a *fresh* rig is told. Once you are running a factor, the recommendation holds
+it until the measurement is more than **0.6 px** clear of your factor's row, so a rig sitting near 4.5, 7.5
+or 10.5 px is not sent back and forth by ordinary night-to-night variation. On 2x2, for instance, anything
+from 3.9 px to 8.1 px reads as "2x2 is right". Inside that margin both factors put your stars within the
+calibrated range, so either one works.
 
 !!! warning "Pixel scale cannot answer this"
     The recommendation is never derived from pixel scale and an assumed seeing figure. Plausible seeing spans

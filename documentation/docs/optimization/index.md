@@ -58,8 +58,8 @@ recommendation](exposure-recommendation.md) for the derivation, its caps, and wh
 saved run each let you do about it.
 
 The summary also reports a recommended **detection binning**. The search holds
-[Detection Binning](../settings/detection-binning.md) fixed, but it reads the in-focus HFR off your fitted
-focus curve and reports the factor that implies.
+[Detection Binning](../settings/detection-binning.md) fixed, but it reads the in-focus HFR off the sweep
+point nearest best focus and reports the factor that implies.
 
 The recommendation only appears when the fit is sound (R² of at least 0.9). A sweep that runs far enough out
 that the detector loses the defocused donuts reports compact noise blobs instead, and those drag the fitted

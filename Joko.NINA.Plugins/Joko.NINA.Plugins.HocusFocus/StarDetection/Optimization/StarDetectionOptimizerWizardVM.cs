@@ -125,12 +125,23 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection.Optimization {
         public int RecommendedDetectionBinning { get; set; } = 1;
 
         /// <summary>
-        /// Fitted minimum (in-focus) HFR for THIS VARIANT's settings, in captured pixels — the optimized settings
-        /// on the Optimized/Feedback views, the current ones on the Current view. It must follow the variant,
-        /// because the variant is what Accept applies and what the chart above is showing: reading it from the
-        /// current-settings curve while displaying the optimized one produced a recommendation that contradicted
-        /// the graph (a run whose optimized curve bottomed at 5.1 px reported 4.3 px and asked for no change).
-        /// NaN when that variant's fit was degenerate.
+        /// The in-focus HFR THIS VARIANT's settings MEASURED, in captured pixels: the pooled HFR of the sweep
+        /// position nearest the fitted minimum. A real measurement at a real focuser position, which is the
+        /// same KIND of quantity the auto-focus engine publishes (<c>AutoFocusEngine.OnCompleted</c> ->
+        /// <c>regionState.FinalHFR</c>) — the two used to disagree by 0.35 px because this was the fitted
+        /// vertex, and on a rig sitting near a band boundary that flipped the binning recommendation every
+        /// run. See docs/binning-recommendation-oscillation-design.md. The vertex itself is
+        /// <see cref="FitVertexInFocusHfr"/>.
+        ///
+        /// <para>It must follow the variant — the optimized settings on the Optimized/Feedback views, the
+        /// current ones on the Current view — because the variant is what Accept applies and what the chart above
+        /// is showing: reading it from the current-settings curve while displaying the optimized one produced a
+        /// recommendation that contradicted the graph (a run whose optimized curve bottomed at 5.1 px reported
+        /// 4.3 px and asked for no change). The measured point preserves that, and is additionally a value the
+        /// user can see plotted, which the extrapolated vertex never was.</para>
+        ///
+        /// <para>NaN when that variant's fit was degenerate (no vertex, so no "nearest" position) or the sweep
+        /// pooled no points.</para>
         /// </summary>
         public double MeasuredInFocusHfr { get; set; } = double.NaN;
 
@@ -142,6 +153,18 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection.Optimization {
         public double BaselineMeasuredInFocusHfr { get; set; } = double.NaN;
 
         public double BaselineFitRSquared { get; set; } = double.NaN;
+
+        /// <summary>
+        /// THIS VARIANT's fitted curve MINIMUM (the hyperbola vertex), in captured pixels. Kept separate from
+        /// <see cref="MeasuredInFocusHfr"/>, which is now a real measured point, because
+        /// <see cref="MinHfrSeed"/> documents the vertex as its input and the optimizer's MinHFR seeding (F35
+        /// / F38) plus every bank result rest on that. Display and publication use the measurement; the
+        /// undersampled-stars test uses this.
+        /// </summary>
+        public double FitVertexInFocusHfr { get; set; } = double.NaN;
+
+        /// <summary>The CURRENT-settings equivalent, carried for <c>BuildCurrentSummary</c>.</summary>
+        public double BaselineFitVertexInFocusHfr { get; set; } = double.NaN;
 
         /// <summary>
         /// Minimum fit quality before the fitted curve minimum may be used as an in-focus HFR.
@@ -233,11 +256,16 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection.Optimization {
         ///
         /// <para>Delegates to <see cref="MinHfrSeed.IsBelowGate"/> rather than re-deriving the comparison, so the
         /// message and the seed cannot drift apart — and so the captured-vs-binned conversion (F38) is applied in
-        /// exactly one place. <see cref="MeasuredInFocusHfr"/> is in CAPTURED pixels;
+        /// exactly one place. <see cref="FitVertexInFocusHfr"/> is in CAPTURED pixels;
         /// <see cref="VariantMinHfr"/> is in BINNED ones.</para>
+        ///
+        /// <para>Reads <see cref="FitVertexInFocusHfr"/>, NOT <see cref="MeasuredInFocusHfr"/>:
+        /// <see cref="MinHfrSeed.IsBelowGate"/> documents the fit vertex as its operand and is shared with the
+        /// seed, so this test has to compare the same quantity the seed does or the wizard could warn about a
+        /// gate it did not move (or move one it never warned about).</para>
         /// </summary>
         public bool HasUndersampledStars =>
-            MinHfrSeed.IsBelowGate(MeasuredInFocusHfr, VariantMinHfr, RunDetectionBinning);
+            MinHfrSeed.IsBelowGate(FitVertexInFocusHfr, VariantMinHfr, RunDetectionBinning);
 
         /// <summary>The exposure-time recommendation derived from THIS VARIANT's accepted-star SNRs (see
         /// <see cref="ExposureRecommender"/>). Null when the summary was built without one (every pre-feature
@@ -2464,20 +2492,29 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection.Optimization {
         /// so a note below the fold can be missed entirely by a user who accepts a landing built from a gated
         /// curve.</para>
         /// </summary>
-        public string UndersampledStarsChartNote {
-            get {
-                var s = SelectedSummary;
-                if (s == null || !s.HasUndersampledStars) {
-                    return string.Empty;
-                }
-                var binned = s.MeasuredInFocusHfr / Math.Max(1, s.RunDetectionBinning);
-                var binningClause = s.RunDetectionBinning > 1
-                    ? $" ({s.MeasuredInFocusHfr:0.00} px at {s.RunDetectionBinning}x{s.RunDetectionBinning} detection binning)"
-                    : string.Empty;
-                return $"This rig's in-focus stars measure {binned:0.00} px{binningClause}, at or below the "
-                    + $"{s.VariantMinHfr:0.00} px Minimum HFR gate, so the detector rejected them through the middle "
-                    + "of the sweep. Lower Minimum HFR for this optical train, or reduce detection binning.";
+        public string UndersampledStarsChartNote => DescribeUndersampledStars(SelectedSummary);
+
+        /// <summary>
+        /// The note's wording, as a static over the summary so a test can pin it without standing up a VM.
+        ///
+        /// <para>It quotes <see cref="OptimizationSummary.FitVertexInFocusHfr"/> — the operand
+        /// <see cref="OptimizationSummary.HasUndersampledStars"/> actually compared — and deliberately NOT
+        /// <see cref="OptimizationSummary.MeasuredInFocusHfr"/>. The note exists to explain why the gate test
+        /// fired, and a measured point is always at or above the vertex, so quoting the measurement would let the
+        /// sentence claim a number is "at or below" a gate it is plainly above (vertex 4.6, measured 5.0, gate 2.4
+        /// at 2x2: fires on 2.3 ≤ 2.4 and would print "2.50 px ... at or below the 2.40 px gate").</para>
+        /// </summary>
+        internal static string DescribeUndersampledStars(OptimizationSummary s) {
+            if (s == null || !s.HasUndersampledStars) {
+                return string.Empty;
             }
+            var binned = s.FitVertexInFocusHfr / Math.Max(1, s.RunDetectionBinning);
+            var binningClause = s.RunDetectionBinning > 1
+                ? $" ({s.FitVertexInFocusHfr:0.00} px at {s.RunDetectionBinning}x{s.RunDetectionBinning} detection binning)"
+                : string.Empty;
+            return $"This rig's in-focus stars measure {binned:0.00} px{binningClause}, at or below the "
+                + $"{s.VariantMinHfr:0.00} px Minimum HFR gate, so the detector rejected them through the middle "
+                + "of the sweep. Lower Minimum HFR for this optical train, or reduce detection binning.";
         }
 
         /// <summary>Whether the undersampled-stars note has anything to say.</summary>
@@ -4143,6 +4180,38 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection.Optimization {
             return (core, recovery);
         }
 
+        /// <summary>
+        /// The in-focus HFR a sweep MEASURED: the pooled Y of the point whose focuser position is nearest
+        /// <paramref name="fittedMinimumX"/>. Takes the points and the abscissa rather than a
+        /// <see cref="RunEvaluationResult"/> so it stays pure and directly testable.
+        ///
+        /// <para>Ties break on the LOWER focuser position, so the published number cannot depend on
+        /// enumeration order.</para>
+        ///
+        /// <para>The fit is still required — it is what says WHICH point is nearest focus — which is why the
+        /// R² gate (<see cref="OptimizationSummary.MinRSquaredForBinningRecommendation"/>) stays: on a sweep
+        /// that lost the defocused donuts the vertex lands in the wrong place, and this would then select the
+        /// wrong point. The gate guards the selection, not the arithmetic.</para>
+        /// </summary>
+        internal static double MeasuredHfrNearestFocus(
+            IReadOnlyList<ScatterErrorPoint> points, double fittedMinimumX) {
+            if (points == null || points.Count == 0 || !double.IsFinite(fittedMinimumX)) {
+                return double.NaN;
+            }
+            var result = double.NaN;
+            var bestDistance = double.MaxValue;
+            var bestX = double.MaxValue;
+            foreach (var p in points) {
+                var distance = Math.Abs(p.X - fittedMinimumX);
+                if (distance < bestDistance || (distance == bestDistance && p.X < bestX)) {
+                    bestDistance = distance;
+                    bestX = p.X;
+                    result = p.Y;
+                }
+            }
+            return result;
+        }
+
         private async Task<(OptimizationSummary Summary, OptimizationCurve CurrentCurve, OptimizationCurve OptimizedCurve)>
             BuildSummaryAsync(IReadOnlyList<LoadedRun> runs, OptimizationResult res, CancellationToken token) {
             // The displayed "before" is the user's CURRENT settings (Baseline), NOT the optimizer's default seed.
@@ -4189,6 +4258,9 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection.Optimization {
             var measuredFitRSquared = double.NaN;
             var baselineInFocusHfr = double.NaN;
             var baselineFitRSquared = double.NaN;
+            // The fitted vertices, carried alongside the measurements: MinHfrSeed's gate test reads the vertex.
+            var fitVertexInFocusHfr = double.NaN;
+            var baselineFitVertexInFocusHfr = double.NaN;
             // The exposure-time recommendation, derived from run 0 ONLY — matching the detection-binning precedent
             // above. With several Replay runs the per-run exposures may legitimately differ, and a single number
             // covering all of them would be ill-defined; the representative run is the one whose curve is plotted.
@@ -4221,9 +4293,20 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection.Optimization {
                     // This summary describes the OPTIMIZED variant, so its in-focus HFR comes from the optimized
                     // curve — the one plotted above it and the one Accept puts into service. The current-settings
                     // numbers are carried alongside for BuildCurrentSummary.
-                    measuredInFocusHfr = bestEval.BestFit?.Minimum.Y ?? double.NaN;
+                    var (baselineCore, baselineRecovery) = PartitionRecoveryPoints(baselineEval);
+                    var (bestCore, bestRecovery) = PartitionRecoveryPoints(bestEval);
+                    // Recovery positions are far-from-focus and down-weighted, so they must not be eligible as
+                    // "the point nearest focus"; fall back to all points when the partition yields none.
+                    var bestPoints = bestCore != null && bestCore.Count > 0 ? bestCore : bestEval.Points;
+                    var baselinePoints = baselineCore != null && baselineCore.Count > 0
+                        ? baselineCore : baselineEval.Points;
+                    measuredInFocusHfr = MeasuredHfrNearestFocus(
+                        bestPoints, bestEval.BestFit?.Minimum.X ?? double.NaN);
+                    fitVertexInFocusHfr = bestEval.BestFit?.Minimum.Y ?? double.NaN;
                     measuredFitRSquared = bestEval.Metrics?.RSquared ?? double.NaN;
-                    baselineInFocusHfr = baselineEval.BestFit?.Minimum.Y ?? double.NaN;
+                    baselineInFocusHfr = MeasuredHfrNearestFocus(
+                        baselinePoints, baselineEval.BestFit?.Minimum.X ?? double.NaN);
+                    baselineFitVertexInFocusHfr = baselineEval.BestFit?.Minimum.Y ?? double.NaN;
                     baselineFitRSquared = baselineEval.Metrics?.RSquared ?? double.NaN;
                     // Both variants' exposure advice, computed HERE because both RunEvaluationResults are already
                     // in hand — the recommender only reads Metrics.FrameStarSnrs, so this costs no extra evaluation
@@ -4236,8 +4319,6 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection.Optimization {
                     // BaselineSensitivity.
                     exposureAdvice = ExposureRecommender.Recommend(bestEval.Metrics, objectiveConstants, runExposureSeconds, res.BestParams);
                     baselineExposureAdvice = ExposureRecommender.Recommend(baselineEval.Metrics, objectiveConstants, runExposureSeconds, baseline);
-                    var (baselineCore, baselineRecovery) = PartitionRecoveryPoints(baselineEval);
-                    var (bestCore, bestRecovery) = PartitionRecoveryPoints(bestEval);
                     currentCurveLocal = new OptimizationCurve {
                         Label = "Current", Points = baselineEval.Points, Fit = baselineEval.BestFit,
                         CorePoints = baselineCore, RecoveryPoints = baselineRecovery,
@@ -4258,6 +4339,10 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection.Optimization {
             var recommendation = StepSizeRecommender.Recommend(
                 representativeBestFit, currentStepSize, GetFocuserMaxStep(), representativeDetectability);
 
+            // Hoisted: the initialiser cannot reference its own RunDetectionBinning, and the recommendation
+            // now needs it to apply the no-change zone.
+            var runDetectionBinning = Math.Max(1, baseline.DetectionBinning);
+
             var summary = new OptimizationSummary {
                 ChangedParameters = changed,
                 SeedJ = currentBaselineJ,
@@ -4275,13 +4360,16 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection.Optimization {
                 CurrentStepSize = currentStepSize,
                 CurrentOffsetSteps = currentOffsetSteps,
                 ImprovedOverSeed = res.ImprovedOverSeed,
-                RunDetectionBinning = Math.Max(1, baseline.DetectionBinning),
+                RunDetectionBinning = runDetectionBinning,
                 PersistedDetectionBinning = DetectionBinningResolver.ToFactor(starDetectionOptions.DetectionBinning),
                 MeasuredInFocusHfr = measuredInFocusHfr,
                 FitRSquared = measuredFitRSquared,
                 BaselineMeasuredInFocusHfr = baselineInFocusHfr,
                 BaselineFitRSquared = baselineFitRSquared,
-                RecommendedDetectionBinning = DetectionBinningResolver.RecommendFromHfr(measuredInFocusHfr),
+                RecommendedDetectionBinning =
+                    DetectionBinningResolver.RecommendFromHfr(measuredInFocusHfr, runDetectionBinning),
+                FitVertexInFocusHfr = fitVertexInFocusHfr,
+                BaselineFitVertexInFocusHfr = baselineFitVertexInFocusHfr,
                 RunExposureSeconds = runExposureSeconds,
                 RunExposureIsAssumed = runExposureIsAssumed,
                 // This summary describes the OPTIMIZED variant, so the gate it reports is the optimized one — the
@@ -4324,7 +4412,11 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection.Optimization {
                 FitRSquared = optimized.BaselineFitRSquared,
                 BaselineMeasuredInFocusHfr = optimized.BaselineMeasuredInFocusHfr,
                 BaselineFitRSquared = optimized.BaselineFitRSquared,
-                RecommendedDetectionBinning = DetectionBinningResolver.RecommendFromHfr(optimized.BaselineMeasuredInFocusHfr),
+                RecommendedDetectionBinning = DetectionBinningResolver.RecommendFromHfr(
+                    optimized.BaselineMeasuredInFocusHfr, optimized.RunDetectionBinning),
+                // The Current view's vertex is the baseline's, exactly as its measured HFR is.
+                FitVertexInFocusHfr = optimized.BaselineFitVertexInFocusHfr,
+                BaselineFitVertexInFocusHfr = optimized.BaselineFitVertexInFocusHfr,
                 // Both variants ran on the same frames, so the exposure — and whether it had to be assumed — is the
                 // same number on either view.
                 RunExposureSeconds = optimized.RunExposureSeconds,

@@ -61,13 +61,45 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
         /// <summary>The largest factor the recommendation will suggest (and the largest the options UI offers).</summary>
         public const int MaxBinningFactor = 4;
 
+        /// <summary>
+        /// Half-width, in captured pixels, of the NO-CHANGE zone straddling each band boundary. Inside it the
+        /// recommendation holds whatever factor is already in service instead of naming the other one.
+        ///
+        /// <para>The comparator had no margin at all, and the quantity it reads moves by more than the
+        /// distance to a boundary for perfectly ordinary reasons: two different code paths publish the
+        /// measurement and disagree by 0.23 px even after they were unified on statistic type, the same
+        /// frames measure 0.44 px apart at 1x1 versus 2x2, and four subs at one position scatter ~0.1 px.
+        /// A rig whose in-focus HFR lands near 4.5 / 7.5 / 10.5 px therefore got a different answer every
+        /// run. 0.6 px covers all three with headroom. See
+        /// docs/binning-recommendation-oscillation-design.md.</para>
+        ///
+        /// <para>FIXED pixels, not a fraction of the boundary: every band is exactly
+        /// <see cref="TargetHfrPixels"/> wide at every factor, so a fractional margin would be wider at 10.5
+        /// px than at 4.5 px for no reason.</para>
+        ///
+        /// <para>The cost is stated plainly: a user on a genuinely wrong factor is told to move 0.6 px later
+        /// than before. That is the right trade here, because within this zone BOTH factors land inside the
+        /// detector's calibrated 2-4 px band, so there is no correct answer to converge on — which is
+        /// precisely when a latching comparator is the right instrument.</para>
+        /// </summary>
+        public const double HysteresisPixels = 0.6;
+
         /// <summary>The integer factor for <paramref name="setting"/>, clamped to the supported range.</summary>
         public static int ToFactor(DetectionBinningEnum setting) => Clamp((int)setting);
 
         /// <summary>
         /// The factor that brings <paramref name="measuredHfrPixels"/> closest to <see cref="TargetHfrPixels"/>.
-        /// The HFR is in CAPTURED pixels — detection reports it that way at every factor — so this answer does not
-        /// depend on the factor the measurement was taken at. NaN or non-positive input recommends 1.
+        /// The HFR is in CAPTURED pixels — detection reports it that way at every factor — so the ARITHMETIC here is
+        /// factor-free.
+        ///
+        /// <para>The MEASUREMENT fed to it is NOT. The same frames measure about 10% lower at 1x1 than at 2x2
+        /// (4.314 px vs 3.870 px on the reported rig), because every pixel-unit gate covers twice the sky at 2x2 and
+        /// a different population of stars is therefore accepted — see
+        /// docs/binning-recommendation-oscillation-design.md §3. So this must not be read as "a measurement taken at
+        /// any factor yields the same answer": that invariant was asserted here once and is false. The spread is one
+        /// of the things <see cref="HysteresisPixels"/> absorbs.</para>
+        ///
+        /// <para>NaN or non-positive input recommends 1.</para>
         /// </summary>
         public static int RecommendFromHfr(double measuredHfrPixels) {
             if (double.IsNaN(measuredHfrPixels) || double.IsInfinity(measuredHfrPixels) || measuredHfrPixels <= 0.0) {
@@ -75,6 +107,34 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
             }
             var raw = measuredHfrPixels / TargetHfrPixels;
             return Clamp((int)Math.Round(raw, MidpointRounding.AwayFromZero));
+        }
+
+        /// <summary>
+        /// The factor to recommend to someone ALREADY RUNNING <paramref name="currentFactor"/>: the same answer
+        /// as <see cref="RecommendFromHfr(double)"/>, except that it holds the current factor while the
+        /// measurement is still within <see cref="HysteresisPixels"/> of that factor's own band.
+        ///
+        /// <para>This makes the recommendation PATH-DEPENDENT on purpose — two rigs with identical
+        /// measurements and different current factors are told different things. Deliberate: see
+        /// <see cref="HysteresisPixels"/>. Callers that have no factor in service (deriving one from scratch,
+        /// e.g. the headless harness) must use the single-argument form, which stays hysteresis-free.</para>
+        ///
+        /// <para>When the measurement DOES clear the zone, this returns the factor the measurement actually
+        /// indicates rather than stepping one toward it: a 1x1 rig measuring 11 px needs 4x4, not 2x2.</para>
+        /// </summary>
+        public static int RecommendFromHfr(double measuredHfrPixels, int currentFactor) {
+            if (!IsUsableHfr(measuredHfrPixels)) {
+                return 1;
+            }
+            var current = Clamp(currentFactor);
+            var raw = RecommendFromHfr(measuredHfrPixels);
+            if (raw == current) {
+                return current;
+            }
+            var halfBand = 0.5 * TargetHfrPixels;
+            var lower = TargetHfrPixels * current - halfBand - HysteresisPixels;
+            var upper = TargetHfrPixels * current + halfBand + HysteresisPixels;
+            return measuredHfrPixels >= lower && measuredHfrPixels < upper ? current : raw;
         }
 
         /// <summary>The <see cref="DetectionBinningEnum"/> member for a factor.</summary>
@@ -95,7 +155,9 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
                 return "Run an auto-focus to get a recommendation";
             }
             var current = Clamp(currentFactor);
-            var recommended = RecommendFromHfr(measuredHfrPixels);
+            // The two-argument form: this line is read by a user who already HAS a factor in service, so the
+            // no-change zone applies. HarnessSettingsStore's from-scratch derivation uses the pure form.
+            var recommended = RecommendFromHfr(measuredHfrPixels, current);
             var ci = CultureInfo.CurrentCulture;
             if (current != recommended) {
                 // A factor to change is the actionable fact on either side of the band, so it keeps the row.
@@ -117,10 +179,11 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
                      + "alone cannot predict star size: seeing varies more than the margin between binning factors.";
             }
 
-            var recommended = RecommendFromHfr(measuredHfrPixels);
+            var recommended = RecommendFromHfr(measuredHfrPixels, Clamp(currentFactor));
             var ci = CultureInfo.CurrentCulture;
             // "from your last auto-focus" covers both writers: an AF run's final exposure and an accepted live
-            // wizard sweep's fitted minimum (see InFocusHfrRecord). Do not narrow it back to "at the end of a run".
+            // wizard sweep's measurement nearest best focus (see InFocusHfrRecord). Do not narrow it back to
+            // "at the end of a run".
             var when = measuredAtUtc.HasValue
                 ? $"Measured {measuredAtUtc.Value.ToLocalTime():g} from your last auto-focus, in captured pixels."
                 : "Measured from your last auto-focus, in captured pixels.";
@@ -145,7 +208,8 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
         /// <summary>True when the current factor is not what the measurement calls for. False when there is no
         /// measurement: the UI must not highlight a mismatch it cannot justify.</summary>
         public static bool DiffersFromRecommendation(int currentFactor, double measuredHfrPixels)
-            => IsUsableHfr(measuredHfrPixels) && Clamp(currentFactor) != RecommendFromHfr(measuredHfrPixels);
+            => IsUsableHfr(measuredHfrPixels)
+                && Clamp(currentFactor) != RecommendFromHfr(measuredHfrPixels, currentFactor);
 
         /// <summary>
         /// Whether the recommendation is worth showing at all: only when it asks for something. That is "run an

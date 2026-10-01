@@ -1041,6 +1041,31 @@ namespace TestApp {
                 ? $"PASS: every frame has >= {objectiveConstants.NHard} stars under optimized params (min observed = {worstFrameCount})"
                 : $"FAIL: at least one frame has < {objectiveConstants.NHard} stars under optimized params (min observed = {worstFrameCount} in run {worstRunId})");
 
+            // The wizard's "Detection Binning" summary block, reproduced headlessly. The harness could not report
+            // this at all, which is why a user-reported oscillation in it had no offline repro: the wizard derives
+            // the recommendation from the MEASURED HFR of the sweep position nearest the fitted minimum
+            // (StarDetectionOptimizerWizardVM.MeasuredHfrNearestFocus), fed through the hysteresis-aware,
+            // current-factor-aware overload of RecommendFromHfr -- not from the fitted vertex, which is printed
+            // alongside only because it is the MinHFR-seed input. The Current variant comes from the BASELINE
+            // curve/points, the Optimized variant from the OPTIMIZED curve/points. Two factors that disagree with
+            // the factor the run was DETECTED at is the whole mechanism: acting on the recommendation re-measures
+            // the HFR that produced it.
+            for (var i = 0; i < loadedRuns.Count; i++) {
+                var ranAt = Math.Max(1, ctx.Baseline.DetectionBinning);
+                var baseVertex = perRunBaseline[i].BestFit?.Minimum.Y ?? double.NaN;
+                var bestVertex = perRunBest[i].BestFit?.Minimum.Y ?? double.NaN;
+                var baseMeasured = StarDetectionOptimizerWizardVM.MeasuredHfrNearestFocus(
+                    perRunBaseline[i].Points, perRunBaseline[i].BestFit?.Minimum.X ?? double.NaN);
+                var bestMeasured = StarDetectionOptimizerWizardVM.MeasuredHfrNearestFocus(
+                    perRunBest[i].Points, perRunBest[i].BestFit?.Minimum.X ?? double.NaN);
+                Console.WriteLine($"  detection binning (wizard block) {loadedRuns[i].Discovered.RunId}: ran at {ranAt}x{ranAt}; "
+                    + $"current measured={F(baseMeasured)} px (vertex {F(baseVertex)}) -> recommends "
+                    + $"{DetectionBinningResolver.RecommendFromHfr(baseMeasured, ranAt)}x, "
+                    + $"optimized measured={F(bestMeasured)} px (vertex {F(bestVertex)}) -> recommends "
+                    + $"{DetectionBinningResolver.RecommendFromHfr(bestMeasured, ranAt)}x "
+                    + $"(fit R^2 {F(perRunBaseline[i].Metrics.RSquared)} -> {F(perRunBest[i].Metrics.RSquared)})");
+            }
+
             // The focuser's max step is unavailable headless, so it is left null — StepSizeRecommender clamps to >= 1.
             var focuserMaxStep = (int?)null;
 
@@ -1751,6 +1776,21 @@ namespace TestApp {
                 sb.AppendLine($"  {run.Discovered.RunId}:");
                 sb.AppendLine($"    sigma_focus   : {F(baselineM.SigmaFocus)} -> {F(bestM.SigmaFocus)}");
                 sb.AppendLine($"    R^2           : {F(baselineM.RSquared)} -> {F(bestM.RSquared)}");
+                // The wizard's Detection Binning block (see the console readout in OptimizeRunSetAsync): the factor
+                // the run was DETECTED at, and the factor each variant's measured in-focus HFR (hysteresis-aware,
+                // current-factor-aware) recommends. The fitted vertex is reported separately -- it is the
+                // MinHFR-seed input, not what the recommendation is computed from.
+                var ranAt = Math.Max(1, baseline.DetectionBinning);
+                var baseMeasured = StarDetectionOptimizerWizardVM.MeasuredHfrNearestFocus(
+                    perRunBaseline[i].Points, perRunBaseline[i].BestFit?.Minimum.X ?? double.NaN);
+                var bestMeasured = StarDetectionOptimizerWizardVM.MeasuredHfrNearestFocus(
+                    perRunBest[i].Points, perRunBest[i].BestFit?.Minimum.X ?? double.NaN);
+                sb.AppendLine($"    in-focus HFR  : {F(baseMeasured)} -> {F(bestMeasured)} px (measured at the position nearest focus)");
+                sb.AppendLine($"    fit vertex    : {F(perRunBaseline[i].BestFit?.Minimum.Y ?? double.NaN)} -> "
+                    + $"{F(perRunBest[i].BestFit?.Minimum.Y ?? double.NaN)} px (MinHFR-seed input only)");
+                sb.AppendLine($"    detection bin : ran at {ranAt}x{ranAt}; recommended "
+                    + $"{DetectionBinningResolver.RecommendFromHfr(baseMeasured, ranAt)}x (current) / "
+                    + $"{DetectionBinningResolver.RecommendFromHfr(bestMeasured, ranAt)}x (optimized)");
                 sb.AppendLine($"    reducedChi^2  : {F(baselineM.ReducedChiSquared)} -> {F(bestM.ReducedChiSquared)}");
                 sb.AppendLine($"    current step  : {run.StepSize}");
                 sb.AppendLine($"    recommended   : step {rec.StepSize}, offset {rec.OffsetSteps} per side (half-width {F(rec.HalfWidth)})");

@@ -104,12 +104,16 @@ public class StarDetectionOptimizerWizardVMTests {
         };
     }
 
-    // Same curve shape, but with an in-focus HFR of 5 px instead of 1.5 — big enough that the detection-binning
+    // Same curve shape, but with an in-focus HFR of 6 px instead of 1.5 — big enough that the detection-binning
     // rule asks for 2x2 while the run analyzed at 1x1. Needed by any test of the recommendation's ACTIONS: with
     // the standard fixture the recommendation matches the run, so every gate is false and such a test is vacuous.
-    private const double LargeStarHyperbolaA = 5.0;
+    //
+    // It has to clear the no-change zone, not merely the band boundary: 1x1's band now reaches
+    // 4.5 + DetectionBinningResolver.HysteresisPixels = 5.1 px, so the 5.0 px this used to carry holds 1x1 and
+    // every "the recommendation differs" fixture guard below goes false.
+    private const double LargeStarHyperbolaA = 6.0;
 
-    // Flatter than HyperbolaB so the sweep spans a realistic 5.0 -> ~9.4 px rather than 5 -> 50; the seed guard
+    // Flatter than HyperbolaB so the sweep spans a realistic 6.0 -> 10.0 px rather than 6 -> 50; the seed guard
     // rejects a curve that steep as unusable.
     private const double LargeStarHyperbolaB = 50.0;
 
@@ -2649,7 +2653,7 @@ public class StarDetectionOptimizerWizardVMTests {
 
         Assert.That(vm.CurrentStep, Is.EqualTo(WizardStep.Summary));
         Assert.That(vm.ShowOptimizeAgainAtRecommendedBinning, Is.True,
-            "fixture guard: this run's 5 px stars must make the recommendation differ, or the assertions below are vacuous");
+            "fixture guard: this run's 6 px stars must make the recommendation differ, or the assertions below are vacuous");
         Assert.Multiple(() => {
             Assert.That(lastNotifiedCanReOptimize, Is.True,
                 "the last thing the UI was told must be that the re-run can proceed - the frames are on disk");
@@ -2681,7 +2685,7 @@ public class StarDetectionOptimizerWizardVMTests {
         await vm.StartAsync(CancellationToken.None);
 
         Assert.That(vm.ShowOptimizeAgainAtRecommendedBinning, Is.True,
-            "fixture guard: this run's 5 px stars must make the recommendation differ, or the assertion below is vacuous");
+            "fixture guard: this run's 6 px stars must make the recommendation differ, or the assertion below is vacuous");
         Assert.That(lastNotifiedCanExecute, Is.True,
             "the last thing the button was told must be that it can run - it is on screen and the frames are on disk");
     }
@@ -2747,7 +2751,7 @@ public class StarDetectionOptimizerWizardVMTests {
             return vm;
         }
 
-        // 5 px stars at 1x1: the measurement calls for a different factor, so both must appear.
+        // 6 px stars at 1x1: the measurement calls for a different factor, so both must appear.
         var differs = await RunWith(LargeStarRun());
         Assert.Multiple(() => {
             Assert.That(differs.ShowOptimizeAgainAtRecommendedBinning, Is.True);
@@ -2777,6 +2781,24 @@ public class StarDetectionOptimizerWizardVMTests {
         // never be offered without frames on disk to re-read.
         Assert.That(vm.CanOptimizeAgainAtRecommendedBinning, Is.EqualTo(vm.Summary.DetectionBinningDiffers));
         Assert.That(vm.HasDetectionBinningBlock, Is.EqualTo(vm.Summary.HasDetectionBinningMeasurement));
+
+        // And the wiring of BOTH in-focus HFR statistics, which nothing else covers END TO END: every other test
+        // builds an OptimizationSummary with an object initialiser, so dropping either line from BuildSummaryAsync
+        // would leave the whole suite green while HasUndersampledStars read NaN and the undersampled-stars warning
+        // went permanently dark in the app. This fixture's curve is params-independent, so both variants carry the
+        // same numbers and the assertion does not depend on which one is selected.
+        Assert.Multiple(() => {
+            Assert.That(vm.Summary.FitVertexInFocusHfr, Is.Not.NaN,
+                "BuildSummaryAsync must populate the fitted vertex — HasUndersampledStars reads it, and NaN silences "
+                + "the warning for every rig");
+            Assert.That(vm.Summary.FitVertexInFocusHfr, Is.EqualTo(HyperbolaA).Within(0.05),
+                "and it must be the fit's OWN minimum, not some other HFR");
+            Assert.That(vm.Summary.MeasuredInFocusHfr, Is.EqualTo(Hfr(HyperbolaP0)).Within(1e-9),
+                "while the PUBLISHED number is a plotted point: this sweep has a frame exactly at the vertex "
+                + "position, so the point nearest focus is the one measured there");
+            Assert.That(vm.Summary.BaselineFitVertexInFocusHfr, Is.Not.NaN,
+                "and the current-settings vertex is carried alongside it, which is what BuildCurrentSummary reads");
+        });
     }
 
     [Test]
@@ -3456,7 +3478,7 @@ public class StarDetectionOptimizerWizardVMTests {
             // cannot tell a box that tracks the variant from one that is simply stuck.
             var snr = double.IsFinite(snrAtHealthyGate) && p.Sensitivity >= 5.0 ? snrAtHealthyGate : starSnr;
             return Task.FromResult(new FrameDetectionResult {
-                // largeStars swaps in the 5 px in-focus curve so a starved run can ALSO carry a detection-binning
+                // largeStars swaps in the 6 px in-focus curve so a starved run can ALSO carry a detection-binning
                 // recommendation — the only way to exercise how a pending "Optimize again at 2x2" interacts with a
                 // fresh capture. The gate still floors either way: the curve is identical at every Sensitivity, so
                 // J responds to the star count alone (StarSnrs never enter the objective).
@@ -3895,7 +3917,7 @@ public class StarDetectionOptimizerWizardVMTests {
 
         await vm.StartAsync(CancellationToken.None);
         Assert.That(vm.ShowOptimizeAgainAtRecommendedBinning, Is.True,
-            "fixture guard: the 5 px stars must call for 2x2, or there is no pending factor to preserve");
+            "fixture guard: the 6 px stars must call for 2x2, or there is no pending factor to preserve");
         Assert.That(vm.HasExposureBlock, Is.True, "fixture guard: and the gate must still floor");
 
         await vm.OptimizeAgainAtRecommendedBinningCommand.ExecuteAsync(null);
@@ -4480,6 +4502,127 @@ public class StarDetectionOptimizerWizardVMTests {
             Assert.That(vm.ExposureBodyText, Does.Not.Contain("Capture a new sweep"),
                 "and the copy must not describe a control that is not on screen");
             Assert.That(vm.AcceptCommand.CanExecute(null), Is.True);
+        });
+    }
+
+    // ---- The published in-focus HFR: a MEASUREMENT, not an extrapolated vertex -----------------------------
+    //
+    // Two writers publish into the same profile-scoped record, and they used to publish different KINDS of
+    // quantity: the auto-focus engine a real exposure at the settled position, the wizard its fitted hyperbola
+    // vertex. See docs/binning-recommendation-oscillation-design.md.
+
+    [Test]
+    public void MeasuredHfrNearestFocus_TakesThePooledPointNearestTheFittedMinimum() {
+        // The reported run's pooled curve (TinkerBolts AutoFocus_20260929_040614, 2x2). The fitted
+        // minimum sits at 19975.06, which is 75 steps from 19900 and 268 from 20243.
+        var points = new List<ScatterErrorPoint> {
+            new ScatterErrorPoint(21272, 17.5207, 0, 0),
+            new ScatterErrorPoint(20929, 16.7038, 0, 0),
+            new ScatterErrorPoint(20586, 11.8217, 0, 0),
+            new ScatterErrorPoint(20243, 6.8162, 0, 0),
+            new ScatterErrorPoint(19900, 4.4363, 0, 0),
+            new ScatterErrorPoint(19557, 6.6012, 0, 0),
+            new ScatterErrorPoint(19214, 10.2686, 0, 0),
+            new ScatterErrorPoint(18871, 18.1985, 0, 0),
+            new ScatterErrorPoint(18528, 22.2525, 0, 0),
+        };
+        Assert.That(StarDetectionOptimizerWizardVM.MeasuredHfrNearestFocus(points, 19975.057614367677),
+            Is.EqualTo(4.4363).Within(1e-9));
+    }
+
+    [Test]
+    public void MeasuredHfrNearestFocus_IsNaNWithoutPointsOrAFit() {
+        var points = new List<ScatterErrorPoint> { new ScatterErrorPoint(100, 3.0, 0, 0) };
+        Assert.Multiple(() => {
+            Assert.That(StarDetectionOptimizerWizardVM.MeasuredHfrNearestFocus(null, 100.0), Is.NaN);
+            Assert.That(StarDetectionOptimizerWizardVM.MeasuredHfrNearestFocus(
+                new List<ScatterErrorPoint>(), 100.0), Is.NaN);
+            Assert.That(StarDetectionOptimizerWizardVM.MeasuredHfrNearestFocus(points, double.NaN), Is.NaN);
+        });
+    }
+
+    [Test]
+    public void MeasuredHfrNearestFocus_BreaksATieOnTheLowerFocuserPosition() {
+        // Deterministic tie-break, so the published number cannot depend on enumeration order.
+        var points = new List<ScatterErrorPoint> {
+            new ScatterErrorPoint(1100, 5.0, 0, 0),
+            new ScatterErrorPoint(900, 4.0, 0, 0),
+        };
+        Assert.That(StarDetectionOptimizerWizardVM.MeasuredHfrNearestFocus(points, 1000.0),
+            Is.EqualTo(4.0).Within(1e-9));
+    }
+
+    // The end-to-end regression: the reported run's two writers must now agree on the factor.
+    [Test]
+    public void ReportedRun_BothWritersNowAgreeOnTheFactor() {
+        const int runFactor = 2;
+        var afEngineValue = 4.661769018918253;   // regionState.FinalHFR.Measure
+        var wizardValue = 4.4363;                // pooled HFR at 19900, nearest the fitted minimum
+        Assert.Multiple(() => {
+            Assert.That(DetectionBinningResolver.RecommendFromHfr(afEngineValue, runFactor),
+                Is.EqualTo(runFactor));
+            Assert.That(DetectionBinningResolver.RecommendFromHfr(wizardValue, runFactor),
+                Is.EqualTo(runFactor));
+            Assert.That(new OptimizationSummary {
+                RunDetectionBinning = runFactor,
+                PersistedDetectionBinning = runFactor,
+                MeasuredInFocusHfr = wizardValue,
+                FitRSquared = 0.977238532067901,
+                RecommendedDetectionBinning =
+                    DetectionBinningResolver.RecommendFromHfr(wizardValue, runFactor)
+            }.DetectionBinningDiffers, Is.False, "no 'Optimize again at 1x1' button");
+        });
+    }
+
+    [Test]
+    public void HasUndersampledStars_ReadsTheFittedVertexNotTheMeasuredPoint() {
+        // MinHfrSeed's documented input is BestFit.Minimum.Y. A gate of 2.4 binned px at 2x2 is 4.8
+        // captured px: the vertex (4.6) is below it, the measured point (5.0) is not.
+        var summary = new OptimizationSummary {
+            RunDetectionBinning = 2,
+            MeasuredInFocusHfr = 5.0,
+            FitVertexInFocusHfr = 4.6,
+            VariantMinHfr = 2.4,
+            FitRSquared = 0.99
+        };
+        Assert.That(summary.HasUndersampledStars, Is.True);
+    }
+
+    /// <summary>
+    /// The note exists to EXPLAIN why <see cref="OptimizationSummary.HasUndersampledStars"/> fired, so it has to
+    /// quote that test's own operand. The predicate reads the fitted vertex, and a measured point is always at or
+    /// above it, so a sentence built from the measurement can assert "measure 2.50 px ... at or below the 2.40 px
+    /// gate" — literally false on exactly the summaries that put it on screen.
+    /// </summary>
+    [Test]
+    public void UndersampledStarsNote_QuotesTheVertexTheGateTestCompared() {
+        var summary = new OptimizationSummary {
+            RunDetectionBinning = 2,
+            MeasuredInFocusHfr = 5.0,
+            FitVertexInFocusHfr = 4.6,
+            VariantMinHfr = 2.4,
+            FitRSquared = 0.99
+        };
+        var note = StarDetectionOptimizerWizardVM.DescribeUndersampledStars(summary);
+        Assert.Multiple(() => {
+            Assert.That(summary.HasUndersampledStars, Is.True,
+                "fixture guard: there is no note unless the gate test fires");
+            Assert.That(note, Does.Contain("measure 2.30 px"), "the BINNED vertex, which is what IsBelowGate compared");
+            Assert.That(note, Does.Contain("(4.60 px at 2x2 detection binning)"), "and the captured vertex beside it");
+            Assert.That(note, Does.Contain("2.40 px Minimum HFR gate"));
+            Assert.That(note, Does.Not.Contain("2.50"),
+                "never the measured point: 2.50 px is ABOVE the gate the sentence says it is at or below");
+            Assert.That(note, Does.Not.Contain("5.00"));
+        });
+    }
+
+    [Test]
+    public void UndersampledStarsNote_IsEmptyWhenTheGateTestDidNotFire() {
+        Assert.Multiple(() => {
+            Assert.That(StarDetectionOptimizerWizardVM.DescribeUndersampledStars(null), Is.Empty);
+            Assert.That(StarDetectionOptimizerWizardVM.DescribeUndersampledStars(
+                new OptimizationSummary { RunDetectionBinning = 1, FitVertexInFocusHfr = 1.8, VariantMinHfr = 1.2 }),
+                Is.Empty);
         });
     }
 }
