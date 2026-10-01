@@ -310,5 +310,40 @@ namespace NINA.Joko.Plugins.HocusFocus.Tests.Utility {
                 Assert.That(DetectionBinningResolver.RecommendFromHfr(4.662), Is.EqualTo(2));
             });
         }
+
+        [Test]
+        public void DescribeRecommendation_HoldsTheCurrentFactorInsideTheNoChangeZone() {
+            Assert.Multiple(() => {
+                // The auto-focus writer's value. Already agreed with 2x2 before the hold zone existed; kept as the
+                // other half of the pair so both writers are pinned to the same verdict.
+                Assert.That(DetectionBinningResolver.DescribeRecommendation(2, 4.662),
+                    Is.EqualTo("Measured in-focus HFR 4.7 px - 2x2 is right"));
+                Assert.That(DetectionBinningResolver.DiffersFromRecommendation(2, 4.662), Is.False);
+                Assert.That(DetectionBinningResolver.ShouldShowRecommendation(2, 4.662), Is.False,
+                    "a row that confirms the current setting is noise");
+                // and outside the zone it still asks for the change
+                Assert.That(DetectionBinningResolver.DescribeRecommendation(1, 6.1),
+                    Is.EqualTo("Measured in-focus HFR 6.1 px - 2x2 recommended"));
+                Assert.That(DetectionBinningResolver.ShouldShowRecommendation(1, 6.1), Is.True);
+                // THE reported oscillation, on the surface the user actually sees. 4.314 px is the wizard's
+                // published value; pre-hysteresis this read "1x1 recommended" and the Options-page row appeared,
+                // while the auto-focus writer's 4.662 px hid it — the row blinked in and out run to run.
+                Assert.That(DetectionBinningResolver.DescribeRecommendation(2, 4.314),
+                    Is.EqualTo("Measured in-focus HFR 4.3 px - 2x2 is right"));
+                Assert.That(DetectionBinningResolver.ShouldShowRecommendation(2, 4.314), Is.False);
+                // and the value the wizard publishes AFTER the later task in this series, same verdict
+                Assert.That(DetectionBinningResolver.DescribeRecommendation(2, 4.4363),
+                    Is.EqualTo("Measured in-focus HFR 4.4 px - 2x2 is right"));
+                Assert.That(DetectionBinningResolver.ShouldShowRecommendation(2, 4.4363), Is.False);
+            });
+        }
+
+        [Test]
+        public void DescribeRecommendationDetail_InTheNoChangeZone_UsesTheInRangeWording() {
+            // currentFactor 1, not 2: the in-range wording needs recommended == 1, which at 4.662 px only happens
+            // when the hold zone keeps a 1x1 rig on 1x1. At 2x2 the raw answer is already 2, so no latch occurs.
+            var detail = DetectionBinningResolver.DescribeRecommendationDetail(1, 4.662, null);
+            Assert.That(detail, Does.Contain("already in that range"));
+        }
     }
 }

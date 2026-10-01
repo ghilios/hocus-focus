@@ -89,8 +89,17 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
 
         /// <summary>
         /// The factor that brings <paramref name="measuredHfrPixels"/> closest to <see cref="TargetHfrPixels"/>.
-        /// The HFR is in CAPTURED pixels — detection reports it that way at every factor — so this answer does not
-        /// depend on the factor the measurement was taken at. NaN or non-positive input recommends 1.
+        /// The HFR is in CAPTURED pixels — detection reports it that way at every factor — so the ARITHMETIC here is
+        /// factor-free.
+        ///
+        /// <para>The MEASUREMENT fed to it is NOT. The same frames measure about 10% lower at 1x1 than at 2x2
+        /// (4.314 px vs 3.870 px on the reported rig), because every pixel-unit gate covers twice the sky at 2x2 and
+        /// a different population of stars is therefore accepted — see
+        /// docs/binning-recommendation-oscillation-design.md §3. So this must not be read as "a measurement taken at
+        /// any factor yields the same answer": that invariant was asserted here once and is false. The spread is one
+        /// of the things <see cref="HysteresisPixels"/> absorbs.</para>
+        ///
+        /// <para>NaN or non-positive input recommends 1.</para>
         /// </summary>
         public static int RecommendFromHfr(double measuredHfrPixels) {
             if (double.IsNaN(measuredHfrPixels) || double.IsInfinity(measuredHfrPixels) || measuredHfrPixels <= 0.0) {
@@ -146,7 +155,9 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
                 return "Run an auto-focus to get a recommendation";
             }
             var current = Clamp(currentFactor);
-            var recommended = RecommendFromHfr(measuredHfrPixels);
+            // The two-argument form: this line is read by a user who already HAS a factor in service, so the
+            // no-change zone applies. HarnessSettingsStore's from-scratch derivation uses the pure form.
+            var recommended = RecommendFromHfr(measuredHfrPixels, current);
             var ci = CultureInfo.CurrentCulture;
             if (current != recommended) {
                 // A factor to change is the actionable fact on either side of the band, so it keeps the row.
@@ -168,7 +179,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
                      + "alone cannot predict star size: seeing varies more than the margin between binning factors.";
             }
 
-            var recommended = RecommendFromHfr(measuredHfrPixels);
+            var recommended = RecommendFromHfr(measuredHfrPixels, Clamp(currentFactor));
             var ci = CultureInfo.CurrentCulture;
             // "from your last auto-focus" covers both writers: an AF run's final exposure and an accepted live
             // wizard sweep's fitted minimum (see InFocusHfrRecord). Do not narrow it back to "at the end of a run".
@@ -196,7 +207,8 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
         /// <summary>True when the current factor is not what the measurement calls for. False when there is no
         /// measurement: the UI must not highlight a mismatch it cannot justify.</summary>
         public static bool DiffersFromRecommendation(int currentFactor, double measuredHfrPixels)
-            => IsUsableHfr(measuredHfrPixels) && Clamp(currentFactor) != RecommendFromHfr(measuredHfrPixels);
+            => IsUsableHfr(measuredHfrPixels)
+                && Clamp(currentFactor) != RecommendFromHfr(measuredHfrPixels, currentFactor);
 
         /// <summary>
         /// Whether the recommendation is worth showing at all: only when it asks for something. That is "run an
