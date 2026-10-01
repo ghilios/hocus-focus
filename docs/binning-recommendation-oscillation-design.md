@@ -3,11 +3,19 @@
 **Reported:** a user (TinkerBolts rig) sees the Star Detection Optimization Wizard "oscillate between
 recommendations, such as binning, each time it is run."
 
-**Status:** REPRODUCED, root cause identified and **isolated** — four headless arms rule out the optimizer
-itself (it is deterministic and converges to a fixed point) and leave exactly one cause: two writers publish
-two different quantities into the one field the recommendation reads, and this rig's two values straddle the
-decision boundary. No fix implemented yet — the fix is a user-visible behaviour change to a recommendation
-(see *Fix options*), and this document is the spec it should be chosen from.
+**Status:** FIXED. Two changes, both required (see *Why BOTH halves are required* in
+`plans/binning-recommendation-oscillation-plan.md`): the wizard now publishes the pooled HFR of the sweep
+position nearest the fitted minimum instead of the fitted vertex, and `DetectionBinningResolver` holds the
+factor in service while the measurement is within `HysteresisPixels` (0.6 px) of that factor's band. Verified
+headless on the reported run, which now reads `ran at 2x2; current measured=4.43628 px (vertex 4.31406) ->
+recommends 2x` where before it read `1x`. The fitted vertex is retained as
+`OptimizationSummary.FitVertexInFocusHfr` for `MinHfrSeed`, whose documented input it is. **NOT yet verified
+live in NINA.**
+
+**Read §2–§4 as the diagnosis of the pre-fix code.** Their present tense describes what the plugin did when the
+report came in; the writer values and recommendations tabulated there are the ones that produced the bug, not
+what the code does now. §3's finding that the measurement is not factor-independent survives the fix — it is
+one of the three variances the 0.6 px margin was sized to absorb.
 
 **Evidence run:** `D:\Autofocus Bank\TinkerBolts\AutoFocus_20260929_040614` (plugin 4.0.0.20, detector v3).
 
