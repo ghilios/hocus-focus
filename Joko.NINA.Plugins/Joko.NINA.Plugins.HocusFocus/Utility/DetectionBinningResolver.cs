@@ -182,7 +182,8 @@ namespace NINA.Joko.Plugins.HocusFocus.Utility {
             var recommended = RecommendFromHfr(measuredHfrPixels, Clamp(currentFactor));
             var ci = CultureInfo.CurrentCulture;
             // "from your last auto-focus" covers both writers: an AF run's final exposure and an accepted live
-            // wizard sweep's fitted minimum (see InFocusHfrRecord). Do not narrow it back to "at the end of a run".
+            // wizard sweep's measurement nearest best focus (see InFocusHfrRecord). Do not narrow it back to
+            // "at the end of a run".
             var when = measuredAtUtc.HasValue
                 ? $"Measured {measuredAtUtc.Value.ToLocalTime():g} from your last auto-focus, in captured pixels."
                 : "Measured from your last auto-focus, in captured pixels.";

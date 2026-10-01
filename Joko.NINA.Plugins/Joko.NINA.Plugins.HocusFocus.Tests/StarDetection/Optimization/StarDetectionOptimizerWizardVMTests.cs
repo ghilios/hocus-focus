@@ -113,7 +113,7 @@ public class StarDetectionOptimizerWizardVMTests {
     // every "the recommendation differs" fixture guard below goes false.
     private const double LargeStarHyperbolaA = 6.0;
 
-    // Flatter than HyperbolaB so the sweep spans a realistic 6.0 -> 10.0 px rather than 6 -> 60; the seed guard
+    // Flatter than HyperbolaB so the sweep spans a realistic 6.0 -> 10.0 px rather than 6 -> 50; the seed guard
     // rejects a curve that steep as unusable.
     private const double LargeStarHyperbolaB = 50.0;
 
@@ -2781,6 +2781,24 @@ public class StarDetectionOptimizerWizardVMTests {
         // never be offered without frames on disk to re-read.
         Assert.That(vm.CanOptimizeAgainAtRecommendedBinning, Is.EqualTo(vm.Summary.DetectionBinningDiffers));
         Assert.That(vm.HasDetectionBinningBlock, Is.EqualTo(vm.Summary.HasDetectionBinningMeasurement));
+
+        // And the wiring of BOTH in-focus HFR statistics, which nothing else covers END TO END: every other test
+        // builds an OptimizationSummary with an object initialiser, so dropping either line from BuildSummaryAsync
+        // would leave the whole suite green while HasUndersampledStars read NaN and the undersampled-stars warning
+        // went permanently dark in the app. This fixture's curve is params-independent, so both variants carry the
+        // same numbers and the assertion does not depend on which one is selected.
+        Assert.Multiple(() => {
+            Assert.That(vm.Summary.FitVertexInFocusHfr, Is.Not.NaN,
+                "BuildSummaryAsync must populate the fitted vertex — HasUndersampledStars reads it, and NaN silences "
+                + "the warning for every rig");
+            Assert.That(vm.Summary.FitVertexInFocusHfr, Is.EqualTo(HyperbolaA).Within(0.05),
+                "and it must be the fit's OWN minimum, not some other HFR");
+            Assert.That(vm.Summary.MeasuredInFocusHfr, Is.EqualTo(Hfr(HyperbolaP0)).Within(1e-9),
+                "while the PUBLISHED number is a plotted point: this sweep has a frame exactly at the vertex "
+                + "position, so the point nearest focus is the one measured there");
+            Assert.That(vm.Summary.BaselineFitVertexInFocusHfr, Is.Not.NaN,
+                "and the current-settings vertex is carried alongside it, which is what BuildCurrentSummary reads");
+        });
     }
 
     [Test]
