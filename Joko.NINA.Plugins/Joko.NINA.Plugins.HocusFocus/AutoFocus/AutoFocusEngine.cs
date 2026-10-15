@@ -551,7 +551,8 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
         }
 
         // Which way the blind sweep is stepping. Only meaningful when Behavior B (the directional bootstrap cap) is
-        // enabled; the initial seed points sit on the high side, so the pre-walk direction is treated as Right.
+        // enabled; the pre-walk direction is the side the initial seed points sit on (Right by default, Left when
+        // ReverseInitialDirection is set).
         private enum WalkDirection {
             Left,
             Right
@@ -1393,16 +1394,21 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                 }
             }
 
-            // Initial set of focus point acquisition getting back to at least the starting point
+            // Initial set of focus point acquisition getting back to at least the starting point. By default the seed
+            // points sit on the high (right) side and are reached by decreasing moves; ReverseInitialDirection mirrors
+            // this so they sit on the low (left) side and are reached by increasing moves.
             var offsetSteps = autoFocusState.Options.AutoFocusInitialOffsetSteps;
             var stepSize = autoFocusState.Options.AutoFocusStepSize;
-            var targetFocuserPosition = initialFocusPosition + ((offsetSteps + 1) * stepSize);
+            var reverseInitialDirection = autoFocusState.Options.ReverseInitialDirection;
+            var seedSign = reverseInitialDirection ? 1 : -1;
+            Logger.Info($"Blind AutoFocus seeding {(reverseInitialDirection ? "below" : "above")} {initialFocusPosition} with {(reverseInitialDirection ? "increasing" : "decreasing")} focuser moves");
+            var targetFocuserPosition = initialFocusPosition - (seedSign * (offsetSteps + 1) * stepSize);
             int leftMostPosition = int.MaxValue;
             int rightMostPosition = int.MinValue;
             for (int i = 0; i < offsetSteps; ++i) {
                 var previousFocuserPosition = targetFocuserPosition;
-                targetFocuserPosition = await focuserMediator.MoveFocuser(targetFocuserPosition - stepSize, token);
-                if (targetFocuserPosition >= previousFocuserPosition) {
+                targetFocuserPosition = await focuserMediator.MoveFocuser(targetFocuserPosition + (seedSign * stepSize), token);
+                if (reverseInitialDirection ? targetFocuserPosition <= previousFocuserPosition : targetFocuserPosition >= previousFocuserPosition) {
                     throw new Exception($"Focuser reached its limit at {targetFocuserPosition}");
                 }
 
@@ -1427,8 +1433,8 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
             var rightStepOuts = 0;
             var hasReversed = false;
             WalkDirection? forcedDirection = null;
-            // The seed points sit on the high (right) side, so failures before the first walk step are attributed to Right.
-            var lastStepDirection = WalkDirection.Right;
+            // Failures before the first walk step are attributed to the side the seed points sit on.
+            var lastStepDirection = reverseInitialDirection ? WalkDirection.Left : WalkDirection.Right;
             // Failures accumulated BEFORE the (single) reversal are baselined out so the reversed direction gets a
             // fresh TooManyFailedMeasurements budget rather than immediately re-tripping on the pre-reversal failures.
             // Stays 0 when Behavior B is disabled, so the throw condition is byte-identical to `failureCount >= offsetSteps`.
@@ -1485,7 +1491,11 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                 // and execute the loop
                 var leftTrendCount = trendlineFit.LeftTrend != null ? trendlineFit.LeftTrend.DataPoints.Count() : 0;
                 var rightTrendCount = trendlineFit.RightTrend != null ? trendlineFit.RightTrend.DataPoints.Count() : 0;
-                if (leftTrendCount >= offsetSteps && rightTrendCount > 0) {
+                var leftTrendComplete = leftTrendCount >= offsetSteps && rightTrendCount > 0;
+                var rightTrendComplete = rightTrendCount >= offsetSteps && leftTrendCount > 0;
+                // When both sides are complete, finish the side the walk was heading toward first (left by default,
+                // right when the initial direction is reversed).
+                if (leftTrendComplete && !(reverseInitialDirection && rightTrendComplete)) {
                     var failedRightPoints = focusPoints.Where(fp => fp.Key > trendlineFit.Minimum.X && fp.Value.Measure == 0).Count();
                     var targetMaxFocuserPosition = trendlineFit.Minimum.X + (failedRightPoints + offsetSteps) * stepSize;
                     Logger.Info($"Enough left trend points ({leftTrendCount}) with an established minimum ({trendlineFit.Minimum.X}) to queue remaining right focus points up to {targetMaxFocuserPosition}");
@@ -1503,7 +1513,7 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                         token.ThrowIfCancellationRequested();
                     }
                     break;
-                } else if (rightTrendCount >= offsetSteps && leftTrendCount > 0) {
+                } else if (rightTrendComplete) {
                     var failedLeftPoints = focusPoints.Where(fp => fp.Key < trendlineFit.Minimum.X && fp.Value.Measure == 0).Count();
                     var targetMinFocuserPosition = trendlineFit.Minimum.X - (failedLeftPoints + offsetSteps) * stepSize;
                     Logger.Info($"Enough right trend points ({rightTrendCount}) with an established minimum ({trendlineFit.Minimum.X}) to queue remaining left focus points down to {targetMinFocuserPosition}");
@@ -1526,7 +1536,9 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                 // Behavior B: choose the step direction, honoring a forced direction set by a prior reversal. When
                 // the behavior is disabled, stepLeft is exactly the original `leftTrendCount < offsetSteps` and no
                 // reversal can fire, so the branch taken (and everything inside it) is byte-identical to the original.
-                var stepLeft = leftTrendCount < offsetSteps;
+                // With the initial direction reversed the preference mirrors: keep stepping right until the right trend
+                // is complete.
+                var stepLeft = reverseInitialDirection ? rightTrendCount >= offsetSteps : leftTrendCount < offsetSteps;
                 if (behaviorBEnabled) {
                     // A step that lowered the lowest MEASURED HFR means this direction is productively descending toward
                     // focus — even before a two-sided bracket forms. We read the lowest measured point directly, NOT
@@ -2086,7 +2098,9 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
         // has to generate this countdown itself rather than relying on the camera's reports reaching the wizard.
         internal const string LiveSweepExposureSource = "HocusFocus.LiveSweep.Exposure";
 
-        internal static IReadOnlyList<int> ComputeSweepPositions(int initial, int offsetSteps, int stepSize) {
+        // The 2N+1 fixed-sweep positions in capture order: descending from initial + N*step by default, or ascending
+        // from initial - N*step when reverse is set, so every point is reached by a move in the configured direction.
+        internal static IReadOnlyList<int> ComputeSweepPositions(int initial, int offsetSteps, int stepSize, bool reverse = false) {
             if (offsetSteps < 1) {
                 throw new ArgumentOutOfRangeException(nameof(offsetSteps), offsetSteps, "offsetSteps must be at least 1 so the sweep visits at least 3 positions.");
             }
@@ -2095,8 +2109,9 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
             }
 
             var positions = new List<int>(2 * offsetSteps + 1);
+            var sign = reverse ? -1 : 1;
             for (int i = offsetSteps; i >= -offsetSteps; i--) {
-                positions.Add(initial + i * stepSize);
+                positions.Add(initial + sign * i * stepSize);
             }
             return positions;
         }
@@ -2364,16 +2379,18 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
 
                 var offsetSteps = state.Options.AutoFocusInitialOffsetSteps;
                 var stepSize = state.Options.AutoFocusStepSize;
-                var positions = ComputeSweepPositions(initialFocusPosition, offsetSteps, stepSize);
+                var reverse = state.Options.ReverseInitialDirection;
+                var positions = ComputeSweepPositions(initialFocusPosition, offsetSteps, stepSize, reverse);
 
                 var framesPerPoint = Math.Max(1, state.Options.FramesPerPoint);
                 var totalFrames = positions.Count * framesPerPoint;
                 var capturedFrames = 0;
 
-                // Overshoot one extra step beyond the high extreme with NO capture, then step monotonically down
-                // through the positions, so every captured point is reached by a decreasing move — the same
-                // single-direction approach the blind sweep uses to keep backlash consistent (StartBlindFocusPoints).
-                await focuserMediator.MoveFocuser(initialFocusPosition + (offsetSteps + 1) * stepSize, token);
+                // Overshoot one extra step beyond the starting extreme with NO capture, then step monotonically through
+                // the positions, so every captured point is reached by a move in the same direction (decreasing by
+                // default, increasing when reversed) — the same single-direction approach the blind sweep uses to keep
+                // backlash consistent (StartBlindFocusPoints).
+                await focuserMediator.MoveFocuser(initialFocusPosition + (reverse ? -1 : 1) * (offsetSteps + 1) * stepSize, token);
 
                 foreach (var targetPosition in positions) {
                     token.ThrowIfCancellationRequested();
@@ -3021,6 +3038,7 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                 AutoFocusStepSize = ((savedAttempt?.StepSize != null) && (savedAttempt?.StepSize > 0)) ? savedAttempt.StepSize.Value : sweepStepSize,
                 FocuserOffset = autoFocusOptions.FocuserOffset,
                 MaxBlindStepsPerDirection = autoFocusOptions.MaxBlindStepsPerDirection,
+                ReverseInitialDirection = autoFocusOptions.ReverseInitialDirection,
                 MaxOutlierRejections = autoFocusOptions.MaxOutlierRejections,
                 OutlierRejectionConfidence = autoFocusOptions.OutlierRejectionConfidence,
                 WeightedHyperbolicFitEnabled = autoFocusOptions.WeightedHyperbolicFitEnabled,

@@ -59,6 +59,7 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
             lastSelectedLoadPath = optionsAccessor.GetValueString("LastSelectedLoadPath", "");
             focuserOffset = optionsAccessor.GetValueInt32("FocuserOffset", 0);
             maxBlindStepsPerDirection = optionsAccessor.GetValueInt32(nameof(MaxBlindStepsPerDirection), 8);
+            reverseInitialDirection = optionsAccessor.GetValueBoolean(nameof(ReverseInitialDirection), false);
             maxOutlierRejections = optionsAccessor.GetValueInt32(nameof(MaxOutlierRejections), 0);
             outlierRejectionConfidence = optionsAccessor.GetValueDouble(nameof(OutlierRejectionConfidence), 0.95);
             weightedHyperbolicFitEnabled = optionsAccessor.GetValueBoolean(nameof(WeightedHyperbolicFitEnabled), true);
@@ -78,6 +79,7 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
             LastSelectedLoadPath = "";
             FocuserOffset = 0;
             MaxBlindStepsPerDirection = 8;
+            ReverseInitialDirection = false;
             MaxOutlierRejections = 0;
             OutlierRejectionConfidence = 0.95;
             WeightedHyperbolicFitEnabled = true;
@@ -223,6 +225,19 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
 
                     maxBlindStepsPerDirection = value;
                     optionsAccessor.SetValueInt32(nameof(MaxBlindStepsPerDirection), maxBlindStepsPerDirection);
+                    RaisePropertyChanged();
+                }
+            }
+        }
+
+        private bool reverseInitialDirection;
+
+        public bool ReverseInitialDirection {
+            get => reverseInitialDirection;
+            set {
+                if (reverseInitialDirection != value) {
+                    reverseInitialDirection = value;
+                    optionsAccessor.SetValueBoolean(nameof(ReverseInitialDirection), reverseInitialDirection);
                     RaisePropertyChanged();
                 }
             }
