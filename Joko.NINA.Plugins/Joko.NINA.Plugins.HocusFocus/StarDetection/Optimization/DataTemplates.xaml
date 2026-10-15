@@ -2,6 +2,7 @@
     x:Class="NINA.Joko.Plugins.HocusFocus.StarDetection.Optimization.DataTemplates"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="clr-namespace:NINA.Joko.Plugins.HocusFocus.Controls"
     xmlns:interfaces="clr-namespace:NINA.Joko.Plugins.HocusFocus.Interfaces"
     xmlns:local="clr-namespace:NINA.Joko.Plugins.HocusFocus.StarDetection.Optimization"
     xmlns:ninactrl="clr-namespace:NINA.CustomControlLibrary;assembly=NINA.CustomControlLibrary"
@@ -175,7 +176,7 @@
                     TrackerFormatString="Focuser: {2:0}, HFR: {4:0.000}" />
             </oxy:Plot.Series>
             <oxy:Plot.Annotations>
-                <oxy:FunctionAnnotation
+                <controls:BoundedFunctionAnnotation
                     Color="{Binding Path=Color, Source={StaticResource SecondaryBrush}}"
                     Equation="{Binding Fitting}" />
                 <oxy:PointAnnotation
@@ -241,7 +242,7 @@
                     TrackerFormatString="Rejected — Focuser: {2:0}, HFR: {4:0.000}" />
             </oxy:Plot.Series>
             <oxy:Plot.Annotations>
-                <oxy:FunctionAnnotation
+                <controls:BoundedFunctionAnnotation
                     Color="{Binding Path=Color, Source={StaticResource SecondaryBrush}}"
                     Equation="{Binding Fitting}" />
                 <oxy:PointAnnotation
