@@ -126,6 +126,13 @@ namespace NINA.Joko.Plugins.HocusFocus.Interfaces {
         public double HFRImprovementThreshold { get; set; }
         public int FocuserOffset { get; set; }
         public int MaxBlindStepsPerDirection { get; set; }
+
+        /// <summary>
+        /// When true, the blind sweep seeds from BELOW the starting position with increasing focuser moves and the trend
+        /// walk prefers stepping right, instead of seeding from above with decreasing moves. Lets a focuser whose
+        /// backlash compensation fires on decreasing moves (e.g. SCT primary-mirror focusers) avoid it for most of the run.
+        /// </summary>
+        public bool ReverseInitialDirection { get; set; }
         public int MaxOutlierRejections { get; set; }
         public double OutlierRejectionConfidence { get; set; }
         public bool WeightedHyperbolicFitEnabled { get; set; }

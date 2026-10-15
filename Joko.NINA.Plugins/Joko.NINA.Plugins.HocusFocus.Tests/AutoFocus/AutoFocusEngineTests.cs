@@ -143,6 +143,14 @@ namespace NINA.Joko.Plugins.HocusFocus.Tests.AutoFocus {
             Assert.That(positions, Is.EqualTo(new[] { 1030, 1020, 1010, 1000, 990, 980, 970 }));
         }
 
+        // ReverseInitialDirection mirrors the sweep: same positions, ascending, so every point is approached with an
+        // increasing move.
+        [Test]
+        public void ComputeSweepPositions_Reverse_CentersOnInitial_SymmetricAscending() {
+            var positions = AutoFocusEngine.ComputeSweepPositions(initial: 1000, offsetSteps: 3, stepSize: 10, reverse: true);
+            Assert.That(positions, Is.EqualTo(new[] { 970, 980, 990, 1000, 1010, 1020, 1030 }));
+        }
+
         [TestCase(1, 3)]
         [TestCase(2, 5)]
         [TestCase(5, 11)]

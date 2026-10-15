@@ -59,6 +59,7 @@ namespace NINA.Joko.Plugins.HocusFocus.Tests.Inspection {
         public string LastSelectedLoadPath { get; set; }
         public int FocuserOffset { get; set; }
         public int MaxBlindStepsPerDirection { get; set; }
+        public bool ReverseInitialDirection { get; set; }
         public int MaxOutlierRejections { get; set; }
         public double OutlierRejectionConfidence { get; set; } = 0.95;
         public bool WeightedHyperbolicFitEnabled { get; set; }

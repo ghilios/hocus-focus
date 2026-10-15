@@ -641,6 +641,63 @@ namespace NINA.Joko.Plugins.HocusFocus.Tests.AutoFocus {
         }
 
         // ------------------------------------------------------------------------------------------------------------
+        // R1 — ReverseInitialDirection mirrors the whole blind walk. On the symmetric steep curve, a reversed run started
+        // d steps BELOW focus must visit exactly the mirror image (about focus) of a default run started d steps ABOVE
+        // it: seeds approached by increasing moves from start-5s up to start-1s, the walk preferring the right, and the
+        // bracket fill-in mirrored. The final-validation move is compared by tolerance (fit round-off), not mirroring.
+        // ------------------------------------------------------------------------------------------------------------
+        [TestCase(0, 0)]
+        [TestCase(0, 8)]
+        [TestCase(20, 0)]
+        [TestCase(20, 8)]
+        public async Task R1_ReverseInitialDirection_MirrorsDefaultTrajectory(int stepsFromFocus, int maxBlindStepsPerDirection) {
+            var defaultRun = await RunDirectedSweep(SteepScenario(), Focus + stepsFromFocus * StepSize, maxBlindStepsPerDirection, reverse: false);
+            var reverseStart = Focus - stepsFromFocus * StepSize;
+            var reverseRun = await RunDirectedSweep(SteepScenario(), reverseStart, maxBlindStepsPerDirection, reverse: true);
+
+            AssertMirroredRuns(defaultRun, reverseRun, reverseStart);
+        }
+
+        // ------------------------------------------------------------------------------------------------------------
+        // R2 — B1 mirrored: with the initial direction reversed, the seed arm (now on the LOW side) is entirely starless.
+        // Behavior B must return to the start and force the RIGHT direction, the exact mirror of B1's leftward rescue.
+        // ------------------------------------------------------------------------------------------------------------
+        [Test]
+        public async Task R2_ReverseInitialDirection_SeedsStarless_ReversalMirrorsB1() {
+            var defaultRun = await RunDirectedSweep(SteepScenario(s => s.RightCutoffSteps = 10), Focus + 10 * StepSize, 8, reverse: false);
+            var reverseStart = Focus - 10 * StepSize;
+            var reverseRun = await RunDirectedSweep(SteepScenario(s => s.LeftCutoffSteps = 10), reverseStart, 8, reverse: true);
+
+            AssertMirroredRuns(defaultRun, reverseRun, reverseStart);
+            Assert.That(reverseRun.History[OffsetSteps], Is.EqualTo(reverseStart), "the sixth move is the reversal's return to the start");
+        }
+
+        private static async Task<(AutoFocusResult Result, int[] History)> RunDirectedSweep(DegradationScenario scenario, int start, int maxBlindStepsPerDirection, bool reverse) {
+            var options = DefaultSweepOptions(scenario, OffsetSteps);
+            options.MaxBlindStepsPerDirection = maxBlindStepsPerDirection;
+            options.ReverseInitialDirection = reverse;
+            var harness = BuildHarness(scenario, options, start, Focus - 5000, Focus + 5000);
+            var result = await RunSweep(harness, options);
+            return (result, harness.Focuser.MoveHistory.ToArray());
+        }
+
+        private static void AssertMirroredRuns((AutoFocusResult Result, int[] History) defaultRun, (AutoFocusResult Result, int[] History) reverseRun, int reverseStart) {
+            var expectedSeeds = Enumerable.Range(0, OffsetSteps).Select(i => reverseStart - (OffsetSteps - i) * StepSize).ToArray();
+            var walkLength = defaultRun.History.Length - 1;
+            Assert.Multiple(() => {
+                Assert.That(defaultRun.Result.Succeeded, Is.True, "the default-direction run succeeds");
+                Assert.That(reverseRun.Result.Succeeded, Is.True, "the reversed run succeeds");
+                Assert.That(reverseRun.History.Take(OffsetSteps), Is.EqualTo(expectedSeeds).AsCollection,
+                    "the seeds ascend from start-5s to start-1s, each reached by an increasing move");
+                Assert.That(reverseRun.History, Has.Length.EqualTo(defaultRun.History.Length), "same number of focuser moves");
+                Assert.That(reverseRun.History.Take(walkLength), Is.EqualTo(defaultRun.History.Take(walkLength).Select(p => 2 * Focus - p)).AsCollection,
+                    "the reversed walk is the mirror image of the default walk about focus");
+                Assert.That(reverseRun.Result.RegionResults[0].EstimatedFinalFocuserPosition, Is.EqualTo(Focus).Within(StepSize),
+                    "the reversed run converges on true focus");
+            });
+        }
+
+        // ------------------------------------------------------------------------------------------------------------
         // Reusable harness construction — the battery builds every scenario on top of these helpers.
         // ------------------------------------------------------------------------------------------------------------
 
