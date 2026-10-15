@@ -2452,7 +2452,7 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection.Optimization {
 
         /// <summary>The chart note's wording, as a constant so a test can pin it without duplicating the string.</summary>
         internal const string LowSignalChartNoteText =
-            "This run's star acceptance gate sits at the bottom of its range, so the result below is built from low-confidence detections; see Star signal.";
+            "Brightness Sensitivity landed at its minimum, so this result leans on faint, near-noise detections and may be less precise than your setup can deliver. See Star signal.";
 
         /// <summary>
         /// F20 part 1 — the entry's actual title: "nothing in the output says your stars are smaller than the

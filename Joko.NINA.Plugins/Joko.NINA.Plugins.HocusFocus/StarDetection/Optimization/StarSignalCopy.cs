@@ -33,6 +33,11 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection.Optimization {
     /// </summary>
     public static class StarSignalCopy {
 
+        /// <summary>Why a floored gate matters even when the result is usable: near-noise detections measure star
+        /// size less precisely, so the focus result may be less accurate than the optical setup can deliver.</summary>
+        internal const string PrecisionCost =
+            "Faint detections like these measure star size less precisely, so it may be less accurate than your optical setup allows.";
+
         /// <summary>
         /// The recommended-exposure row's value, e.g. "3 s → 12 s (measured star S/N 4.1; target 10)". Empty when
         /// there is no derived number at all, which hides the row (the block still shows its diagnosis body).
@@ -127,8 +132,8 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection.Optimization {
             // actual numbers belong.
             var gate = $"the bottom of its range ({summary.VariantSensitivity:F3})";
             var text = starsBarelyCleared
-                ? $"Stars barely cleared the noise and Brightness Sensitivity is at {gate}: this focus result rests on low-confidence detections."
-                : $"Brightness Sensitivity is at {gate}: this focus result rests on low-confidence detections.";
+                ? $"Stars barely cleared the noise and Brightness Sensitivity is at {gate}: this focus result rests on low-confidence detections. {PrecisionCost}"
+                : $"Brightness Sensitivity is at {gate}: this focus result rests on low-confidence detections. {PrecisionCost}";
 
             // The derivation rests on an exposure nothing recorded — say so BEFORE quoting any of it. Gated on
             // `measured` as well as on the flag: with no derivation there is no row and no tooltip, so "this
@@ -146,7 +151,7 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection.Optimization {
                     // across frames), NOT a property of "the stars that were accepted" — at a 0.125 gate the
                     // accepted set runs from 0.125 upward, so claiming they all measure 22 is simply false. The
                     // tail clause reconciles the two facts instead of leaving them looking contradictory.
-                    text += $" Star brightness is not the problem: your brightest stars measure S/N {advice.MeasuredSnr:0.#}, meeting the default S/N target of {ExposureRecommender.TargetSensitivity:0.#}. Brightness Sensitivity is low, so far fainter candidates are being admitted below them.";
+                    text += $" Your brightest stars measure S/N {advice.MeasuredSnr:0.#}, meeting the default S/N target of {ExposureRecommender.TargetSensitivity:0.#}, so the floor is not for lack of bright stars. Brightness Sensitivity is low, so far fainter candidates are being admitted below them.";
                     // PARTIAL-short only. ExposureIsNotTheLimit already excludes all-short by construction (see
                     // ExposureRecommendation.StarCountIsTheLimit), so the upper bound is belt-and-braces against a
                     // hand-built advice object — without it an all-short run would read "9 of 9 frames ... the low
@@ -159,7 +164,7 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection.Optimization {
                     // is no candidate waiting for more signal and none forming. Offering another doubling here is
                     // what walked the reported rig from 2 s to 14 s for six extra stars, so this state offers no
                     // exposure at all and names the levers that can actually move a small field.
-                    text += $" All {advice.UsableFrameCount} frames found fewer stars than the star-count target, and no candidate was rejected for being too faint — these frames contain every star the detector can find. A longer exposure will not add more. Long focal lengths see few stars per frame; detection binning, a wider field, or accepting that this field supports fewer stars are the options.";
+                    text += $" All {advice.UsableFrameCount} frames found fewer stars than the star-count target, and no candidate was rejected for being too faint, so a longer exposure will not add more: these frames contain every star the detector can find. Detection binning is the lever that can still help; otherwise this field simply supports fewer stars.";
                 } else if (advice.StarCountIsTheLimit && advice.IncreasesExposure) {
                     // Bright enough, too few. This branch previously asserted that a longer exposure "cannot raise
                     // that" — false, and the measurement that was cited only ever tested the GATE. Exposure acts
@@ -326,8 +331,8 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection.Optimization {
             // always had. (StarFieldIsExhausted is not reached either: it leaves ExposureIsNotTheLimit false, so
             // branch 2 above claims it.)
             if (advice != null && advice.HasRecommendation && advice.ExposureIsNotTheLimit) {
-                return "The gate was lowered to admit more candidates, not because star brightness was missing. "
-                    + "Set Brightness Sensitivity by hand in the star detection options and run this wizard again in "
+                return "Review the frames: if they show plenty of stars, the optimizer chose the floor on its own, not because "
+                    + "stars were missing. Set Brightness Sensitivity by hand in the star detection options and run this wizard again in "
                     + "\"use current settings\" mode to compare that landing against this one.";
             }
             return string.Empty;

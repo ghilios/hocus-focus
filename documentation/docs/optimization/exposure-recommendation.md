@@ -120,15 +120,15 @@ evenly, so a value capped at 30 s always rounds to exactly 30 s, never past it.
 
 The recommender never proposes a **shorter** exposure than the one the run already used. When the measured
 signal already meets the target (\(S_{\text{now}} \ge 10\)) and at least one frame found a full
-\(N_{\text{target}}\) stars, the block says so: "Star brightness is not the problem: your brightest stars
-measure S/N 22.4, meeting the default S/N target of 10. Brightness Sensitivity is low, so far fainter
-candidates are being admitted below them." If some, but not all, frames came up short of the star-count
+\(N_{\text{target}}\) stars, the block says so: "Your brightest stars measure
+S/N 22.4, meeting the default S/N target of 10, so the floor is not for lack of bright stars. Brightness
+Sensitivity is low, so far fainter candidates are being admitted below them." If some, but not all, frames came up short of the star-count
 target it adds the count: "3 of 9 frames found fewer stars than the star-count target; Brightness Sensitivity
 is low to scrape for count in a star-poor field."
 
-The instruction it ends on is about the gate, not the exposure: "The gate was lowered to admit more
-candidates, not because star brightness was missing. Set Brightness Sensitivity by hand in the star detection
-options and run this wizard again in 'use current settings' mode to compare that landing against this one."
+The instruction it ends on is about the gate, not the exposure: "Review the frames: if they show
+plenty of stars, the optimizer chose the floor on its own, not because stars were missing. Set Brightness
+Sensitivity by hand in the star detection options and run this wizard again in 'use current settings' mode to compare that landing against this one."
 
 ## When the field is short of stars, not signal
 
@@ -150,9 +150,9 @@ cap never binds on a probe that only doubles.
 
 If the gate could have rejected something and did not, the run has shown that these frames hold every star the
 detector can find, and no exposure is offered: "All 9 frames found fewer stars than the star-count target, and
-no candidate was rejected for being too faint — these frames contain every star the detector can find. A
-longer exposure will not add more. Long focal lengths see few stars per frame; detection binning, a wider
-field, or accepting that this field supports fewer stars are the options."
+no candidate was rejected for being too faint, so a longer exposure will not add more: these frames contain
+every star the detector can find. Detection binning is the lever that can still help; otherwise this field
+simply supports fewer stars."
 
 In both states the block adds a sweep-geometry note when candidates were discarded for being flat and
 featureless. That happens on frames far enough from focus that stars spread into plain discs, which no
