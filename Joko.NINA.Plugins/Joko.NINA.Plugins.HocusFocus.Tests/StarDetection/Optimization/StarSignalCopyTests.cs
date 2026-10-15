@@ -72,10 +72,12 @@ public class StarSignalCopyTests {
     /// <summary>The unconditional first sentence, in its two shapes — spelled out here so the golden whole-string
     /// assertions below stay readable while still being whole-string.</summary>
     private const string LowSignalOpening =
-        "Stars barely cleared the noise and Brightness Sensitivity is at the bottom of its range (0.125): this focus result rests on low-confidence detections.";
+        "Stars barely cleared the noise and Brightness Sensitivity is at the bottom of its range (0.125): this focus result rests on low-confidence detections."
+        + " Faint detections like these measure star size less precisely, so it may be less accurate than your optical setup allows.";
 
     private const string NeutralOpening =
-        "Brightness Sensitivity is at the bottom of its range (0.125): this focus result rests on low-confidence detections.";
+        "Brightness Sensitivity is at the bottom of its range (0.125): this focus result rests on low-confidence detections."
+        + " Faint detections like these measure star size less precisely, so it may be less accurate than your optical setup allows.";
 
     private const string ReplayReassurance =
         " You can still accept these settings; they are the best fit for frames like these.";
@@ -275,7 +277,7 @@ public class StarSignalCopyTests {
         var text = Body(Starved(advice: Advice(5, 5, 22.0, exposureIsNotTheLimit: true)), live: true);
         Assert.That(text, Is.EqualTo(
             NeutralOpening
-            + " Star brightness is not the problem: your brightest stars measure S/N 22, meeting the default S/N target of 10."
+            + " Your brightest stars measure S/N 22, meeting the default S/N target of 10, so the floor is not for lack of bright stars."
             + " Brightness Sensitivity is low, so far fainter candidates are being admitted below them."
             + " " + GateRemedy));
         Assert.Multiple(() => {
@@ -287,8 +289,8 @@ public class StarSignalCopyTests {
 
     /// <summary>F49's remedy, spelled out so the golden whole-string assertions stay readable.</summary>
     private const string GateRemedy =
-        "The gate was lowered to admit more candidates, not because star brightness was missing. "
-        + "Set Brightness Sensitivity by hand in the star detection options and run this wizard again in "
+        "Review the frames: if they show plenty of stars, the optimizer chose the floor on its own, not because "
+        + "stars were missing. Set Brightness Sensitivity by hand in the star detection options and run this wizard again in "
         + "\"use current settings\" mode to compare that landing against this one.";
 
     [Test]
