@@ -205,12 +205,12 @@
                         Color="{Binding Path=Color, Source={StaticResource BottomRightBrush}}" />
                 </oxy:Plot.Series>
                 <oxy:Plot.Annotations>
-                    <oxy:FunctionAnnotation
+                    <controls:BoundedFunctionAnnotation
                         Name="CenterCurveFitting"
                         Equation="{Binding RegionCurveFittings[1]}"
                         LineStyle="LongDash"
                         Color="{Binding Path=Color, Source={StaticResource PrimaryBrush}}">
-                        <oxy:FunctionAnnotation.StrokeThickness>
+                        <controls:BoundedFunctionAnnotation.StrokeThickness>
                             <MultiBinding Converter="{StaticResource HF_MultiBooleanToZeroConverter}">
                                 <Binding>
                                     <Binding.Source>
@@ -219,13 +219,13 @@
                                 </Binding>
                                 <Binding Path="RegionCurveFittings[1]" />
                             </MultiBinding>
-                        </oxy:FunctionAnnotation.StrokeThickness>
-                    </oxy:FunctionAnnotation>
-                    <oxy:FunctionAnnotation
+                        </controls:BoundedFunctionAnnotation.StrokeThickness>
+                    </controls:BoundedFunctionAnnotation>
+                    <controls:BoundedFunctionAnnotation
                         Name="TopLeftCurveFitting"
                         Equation="{Binding RegionCurveFittings[2]}"
                         Color="{Binding Path=Color, Source={StaticResource TopLeftBrush}}">
-                        <oxy:FunctionAnnotation.StrokeThickness>
+                        <controls:BoundedFunctionAnnotation.StrokeThickness>
                             <MultiBinding Converter="{StaticResource HF_MultiBooleanToZeroConverter}">
                                 <Binding>
                                     <Binding.Source>
@@ -234,13 +234,13 @@
                                 </Binding>
                                 <Binding Path="RegionCurveFittings[2]" />
                             </MultiBinding>
-                        </oxy:FunctionAnnotation.StrokeThickness>
-                    </oxy:FunctionAnnotation>
-                    <oxy:FunctionAnnotation
+                        </controls:BoundedFunctionAnnotation.StrokeThickness>
+                    </controls:BoundedFunctionAnnotation>
+                    <controls:BoundedFunctionAnnotation
                         Name="TopRightCurveFitting"
                         Equation="{Binding RegionCurveFittings[3]}"
                         Color="{Binding Path=Color, Source={StaticResource TopRightBrush}}">
-                        <oxy:FunctionAnnotation.StrokeThickness>
+                        <controls:BoundedFunctionAnnotation.StrokeThickness>
                             <MultiBinding Converter="{StaticResource HF_MultiBooleanToZeroConverter}">
                                 <Binding>
                                     <Binding.Source>
@@ -249,13 +249,13 @@
                                 </Binding>
                                 <Binding Path="RegionCurveFittings[3]" />
                             </MultiBinding>
-                        </oxy:FunctionAnnotation.StrokeThickness>
-                    </oxy:FunctionAnnotation>
-                    <oxy:FunctionAnnotation
+                        </controls:BoundedFunctionAnnotation.StrokeThickness>
+                    </controls:BoundedFunctionAnnotation>
+                    <controls:BoundedFunctionAnnotation
                         Name="BottomLeftCurveFitting"
                         Equation="{Binding RegionCurveFittings[4]}"
                         Color="{Binding Path=Color, Source={StaticResource BottomLeftBrush}}">
-                        <oxy:FunctionAnnotation.StrokeThickness>
+                        <controls:BoundedFunctionAnnotation.StrokeThickness>
                             <MultiBinding Converter="{StaticResource HF_MultiBooleanToZeroConverter}">
                                 <Binding>
                                     <Binding.Source>
@@ -264,13 +264,13 @@
                                 </Binding>
                                 <Binding Path="RegionCurveFittings[4]" />
                             </MultiBinding>
-                        </oxy:FunctionAnnotation.StrokeThickness>
-                    </oxy:FunctionAnnotation>
-                    <oxy:FunctionAnnotation
+                        </controls:BoundedFunctionAnnotation.StrokeThickness>
+                    </controls:BoundedFunctionAnnotation>
+                    <controls:BoundedFunctionAnnotation
                         Name="BottomRightCurveFitting"
                         Equation="{Binding RegionCurveFittings[5]}"
                         Color="{Binding Path=Color, Source={StaticResource BottomRightBrush}}">
-                        <oxy:FunctionAnnotation.StrokeThickness>
+                        <controls:BoundedFunctionAnnotation.StrokeThickness>
                             <MultiBinding Converter="{StaticResource HF_MultiBooleanToZeroConverter}">
                                 <Binding>
                                     <Binding.Source>
@@ -279,8 +279,8 @@
                                 </Binding>
                                 <Binding Path="RegionCurveFittings[5]" />
                             </MultiBinding>
-                        </oxy:FunctionAnnotation.StrokeThickness>
-                    </oxy:FunctionAnnotation>
+                        </controls:BoundedFunctionAnnotation.StrokeThickness>
+                    </controls:BoundedFunctionAnnotation>
                     <oxy:PointAnnotation
                         Name="CenterFinalFocusPoint"
                         Fill="{Binding Path=Color, Source={StaticResource AltPrimaryBrush}}"
