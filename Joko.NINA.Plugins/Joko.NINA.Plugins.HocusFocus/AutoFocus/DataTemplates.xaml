@@ -216,8 +216,36 @@
                         TicklineColor="{Binding Path=Color, Source={StaticResource SecondaryBrush}}" />
                 </oxy:Plot.Axes>
                 <oxy:Plot.Series>
-                    <!--  Per-colour-channel (OSC) focus points: small, semi-transparent, fixed R/G/B markers, declared FIRST so
-                          every luminance series draws on top of them. Empty (and collapsed) unless the run measured colour
+                    <!--  Window-excluded overlay (Behavior A): sweep points outside the symmetric focus window, rendered as
+                          hollow rings (transparent fill + faint primary stroke) with a dimmed HFR error bar, so they read as
+                          "present but excluded from the fit" WITHOUT the red-cross "rejected point" language used below.
+                          Declared BEFORE the filled FocusPoints series so it draws underneath. Empty (nothing drawn) for a
+                          well-centered run, so this is inert at the baseline. Mirrors the optimizer's recovery overlay.  -->
+                    <oxy:ScatterErrorSeries
+                        DataFieldX="FocusPosition"
+                        DataFieldY="HFR"
+                        ErrorBarColor="{Binding Path=Color, Source={StaticResource NotificationErrorBrush}, Converter={StaticResource SetAlphaToColorConverter}, ConverterParameter=100}"
+                        ErrorBarStopWidth="2"
+                        ErrorBarStrokeThickness="1"
+                        ItemsSource="{Binding PlotWindowExcludedFocusPoints}"
+                        MarkerFill="Transparent"
+                        MarkerSize="5"
+                        MarkerStroke="{Binding Path=Color, Source={StaticResource PrimaryBrush}, Converter={StaticResource SetAlphaToColorConverter}, ConverterParameter=150}"
+                        MarkerStrokeThickness="1.5"
+                        MarkerType="Circle"
+                        TrackerFormatString="Focuser: {2:0}, HFR: {4:0.000} (excluded)" />
+                    <oxy:ScatterErrorSeries
+                        DataFieldX="FocusPosition"
+                        DataFieldY="HFR"
+                        ErrorBarColor="{Binding Path=Color, Source={StaticResource NotificationErrorBrush}}"
+                        ErrorBarStopWidth="2"
+                        ErrorBarStrokeThickness="2"
+                        ItemsSource="{Binding PlotCoreFocusPoints}"
+                        MarkerFill="{Binding Path=Color, Source={StaticResource PrimaryBrush}}"
+                        MarkerType="Circle" />
+                    <!--  Per-colour-channel (OSC) focus points: small, semi-transparent, fixed R/G/B markers, declared AFTER the
+                          luminance markers so each draws as a coloured dot inside the larger luminance marker (a channel
+                          focusing with luminance would otherwise vanish under it). Empty (and collapsed) unless the run measured colour
                           channels. Display only; the AF focuses on luminance.  -->
                     <oxy:ScatterErrorSeries
                         DataFieldX="FocusPosition"
@@ -255,33 +283,6 @@
                         MarkerType="Circle"
                         TrackerFormatString="Focuser: {2:0}, B HFR: {4:0.000}"
                         Visibility="{Binding ShowChannelCurves, Converter={StaticResource BooleanToVisibilityCollapsedConverter}}" />
-                    <!--  Window-excluded overlay (Behavior A): sweep points outside the symmetric focus window, rendered as
-                          hollow rings (transparent fill + faint primary stroke) with a dimmed HFR error bar, so they read as
-                          "present but excluded from the fit" WITHOUT the red-cross "rejected point" language used below.
-                          Declared BEFORE the filled FocusPoints series so it draws underneath. Empty (nothing drawn) for a
-                          well-centered run, so this is inert at the baseline. Mirrors the optimizer's recovery overlay.  -->
-                    <oxy:ScatterErrorSeries
-                        DataFieldX="FocusPosition"
-                        DataFieldY="HFR"
-                        ErrorBarColor="{Binding Path=Color, Source={StaticResource NotificationErrorBrush}, Converter={StaticResource SetAlphaToColorConverter}, ConverterParameter=100}"
-                        ErrorBarStopWidth="2"
-                        ErrorBarStrokeThickness="1"
-                        ItemsSource="{Binding PlotWindowExcludedFocusPoints}"
-                        MarkerFill="Transparent"
-                        MarkerSize="5"
-                        MarkerStroke="{Binding Path=Color, Source={StaticResource PrimaryBrush}, Converter={StaticResource SetAlphaToColorConverter}, ConverterParameter=150}"
-                        MarkerStrokeThickness="1.5"
-                        MarkerType="Circle"
-                        TrackerFormatString="Focuser: {2:0}, HFR: {4:0.000} (excluded)" />
-                    <oxy:ScatterErrorSeries
-                        DataFieldX="FocusPosition"
-                        DataFieldY="HFR"
-                        ErrorBarColor="{Binding Path=Color, Source={StaticResource NotificationErrorBrush}}"
-                        ErrorBarStopWidth="2"
-                        ErrorBarStrokeThickness="2"
-                        ItemsSource="{Binding PlotCoreFocusPoints}"
-                        MarkerFill="{Binding Path=Color, Source={StaticResource PrimaryBrush}}"
-                        MarkerType="Circle" />
                     <!--  Point-to-point connecting line, inherited from core's AF chart. Drawn at 50% alpha so it reads as
                           a background cue for the raw sweep shape and does not compete with the fitted curve.  -->
                     <oxy:LineSeries
@@ -332,20 +333,23 @@
                             </MultiBinding>
                         </oxy:LineAnnotation.Color>
                     </oxy:LineAnnotation>
-                    <!--  Per-colour-channel fitted curves: thin lines in the channel colours, declared before the luminance
+                    <!--  Per-colour-channel fitted curves: thin SOLID lines in the channel colours (the luminance curve is dashed), declared before the luminance
                           curves so luminance stays on top. Equation is null (nothing drawn) without channel data.  -->
                     <controls:BoundedFunctionAnnotation
                         Equation="{Binding RedFitting}"
+                        LineStyle="Solid"
                         StrokeThickness="1"
                         Color="#A0E04848"
                         Visibility="{Binding ShowChannelCurves, Converter={StaticResource BooleanToVisibilityCollapsedConverter}}" />
                     <controls:BoundedFunctionAnnotation
                         Equation="{Binding GreenFitting}"
+                        LineStyle="Solid"
                         StrokeThickness="1"
                         Color="#A040B040"
                         Visibility="{Binding ShowChannelCurves, Converter={StaticResource BooleanToVisibilityCollapsedConverter}}" />
                     <controls:BoundedFunctionAnnotation
                         Equation="{Binding BlueFitting}"
+                        LineStyle="Solid"
                         StrokeThickness="1"
                         Color="#A04878E8"
                         Visibility="{Binding ShowChannelCurves, Converter={StaticResource BooleanToVisibilityCollapsedConverter}}" />
