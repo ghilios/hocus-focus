@@ -164,6 +164,10 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus.Replay {
         public double ReducedChiSquaredRejectionThreshold { get; set; }
         public int MaxBlindStepsPerDirection { get; set; }
         public bool SymmetricFocusWindowEnabled { get; set; }
+
+        /// <summary>Null in metadata written before the option existed: replay then keeps the current setting rather
+        /// than silently turning per-channel curves off for every older OSC run.</summary>
+        public bool? MeasureColorChannels { get; set; }
     }
 
     /// <summary>

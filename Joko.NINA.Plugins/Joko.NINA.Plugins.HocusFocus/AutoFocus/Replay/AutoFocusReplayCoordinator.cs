@@ -106,6 +106,9 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus.Replay {
                 afOptions.HyperbolicFitModel = af.HyperbolicFitModel;
                 afOptions.FitRejectionCriterion = af.FitRejectionCriterion;
                 afOptions.ReducedChiSquaredRejectionThreshold = af.ReducedChiSquaredRejectionThreshold;
+                if (af.MeasureColorChannels.HasValue) {
+                    afOptions.MeasureColorChannels = af.MeasureColorChannels.Value;
+                }
             }
 
             // AutoFocus options: profile-owned subset (step size deliberately not written — replay re-derives it).

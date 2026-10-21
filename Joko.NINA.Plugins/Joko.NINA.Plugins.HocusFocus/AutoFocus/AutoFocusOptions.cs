@@ -60,6 +60,7 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
             focuserOffset = optionsAccessor.GetValueInt32("FocuserOffset", 0);
             maxBlindStepsPerDirection = optionsAccessor.GetValueInt32(nameof(MaxBlindStepsPerDirection), 8);
             reverseInitialDirection = optionsAccessor.GetValueBoolean(nameof(ReverseInitialDirection), false);
+            measureColorChannels = optionsAccessor.GetValueBoolean(nameof(MeasureColorChannels), false);
             maxOutlierRejections = optionsAccessor.GetValueInt32(nameof(MaxOutlierRejections), 0);
             outlierRejectionConfidence = optionsAccessor.GetValueDouble(nameof(OutlierRejectionConfidence), 0.95);
             weightedHyperbolicFitEnabled = optionsAccessor.GetValueBoolean(nameof(WeightedHyperbolicFitEnabled), true);
@@ -80,6 +81,7 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
             FocuserOffset = 0;
             MaxBlindStepsPerDirection = 8;
             ReverseInitialDirection = false;
+            MeasureColorChannels = false;
             MaxOutlierRejections = 0;
             OutlierRejectionConfidence = 0.95;
             WeightedHyperbolicFitEnabled = true;
@@ -238,6 +240,19 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                 if (reverseInitialDirection != value) {
                     reverseInitialDirection = value;
                     optionsAccessor.SetValueBoolean(nameof(ReverseInitialDirection), reverseInitialDirection);
+                    RaisePropertyChanged();
+                }
+            }
+        }
+
+        private bool measureColorChannels;
+
+        public bool MeasureColorChannels {
+            get => measureColorChannels;
+            set {
+                if (measureColorChannels != value) {
+                    measureColorChannels = value;
+                    optionsAccessor.SetValueBoolean(nameof(MeasureColorChannels), measureColorChannels);
                     RaisePropertyChanged();
                 }
             }

@@ -36,6 +36,7 @@ public class AutoFocusOptionsTests {
             Assert.That(options.MaxOutlierRejections, Is.EqualTo(0));
             Assert.That(options.OutlierRejectionConfidence, Is.EqualTo(0.95));
             Assert.That(options.WeightedHyperbolicFitEnabled, Is.True);
+            Assert.That(options.MeasureColorChannels, Is.False);
         });
     }
 
@@ -54,6 +55,7 @@ public class AutoFocusOptionsTests {
         options.MaxOutlierRejections = 3;
         options.OutlierRejectionConfidence = 0.93;
         options.WeightedHyperbolicFitEnabled = false;
+        options.MeasureColorChannels = true;
 
         Assert.Multiple(() => {
             Assert.That(store.Snapshot["MaxConcurrent"], Is.EqualTo(4));
@@ -68,6 +70,7 @@ public class AutoFocusOptionsTests {
             Assert.That(store.Snapshot[nameof(AutoFocusOptions.MaxOutlierRejections)], Is.EqualTo(3));
             Assert.That(store.Snapshot[nameof(AutoFocusOptions.OutlierRejectionConfidence)], Is.EqualTo(0.93));
             Assert.That(store.Snapshot[nameof(AutoFocusOptions.WeightedHyperbolicFitEnabled)], Is.False);
+            Assert.That(store.Snapshot[nameof(AutoFocusOptions.MeasureColorChannels)], Is.True);
         });
     }
 
@@ -80,6 +83,7 @@ public class AutoFocusOptionsTests {
         options.KeepFramesForReview = true;
         options.MaxOutlierRejections = 4;
         options.OutlierRejectionConfidence = 0.80;
+        options.MeasureColorChannels = true;
 
         options.ResetDefaults();
 
@@ -93,6 +97,7 @@ public class AutoFocusOptionsTests {
             Assert.That(options.MaxOutlierRejections, Is.EqualTo(0));
             Assert.That(options.OutlierRejectionConfidence, Is.EqualTo(0.95));
             Assert.That(options.WeightedHyperbolicFitEnabled, Is.True);
+            Assert.That(options.MeasureColorChannels, Is.False);
         });
     }
 
@@ -127,6 +132,7 @@ public class AutoFocusOptionsTests {
     [TestCase(nameof(AutoFocusOptions.MaxOutlierRejections), 2)]
     [TestCase(nameof(AutoFocusOptions.OutlierRejectionConfidence), 0.93)]
     [TestCase(nameof(AutoFocusOptions.WeightedHyperbolicFitEnabled), false)]
+    [TestCase(nameof(AutoFocusOptions.MeasureColorChannels), true)]
     public void Setter_RaisesPropertyChanged(string propertyName, object newValue) {
         var (options, _, _) = Build();
         var raised = new List<string>();

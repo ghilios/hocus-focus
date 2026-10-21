@@ -133,6 +133,13 @@ namespace NINA.Joko.Plugins.HocusFocus.Interfaces {
         /// backlash compensation fires on decreasing moves (e.g. SCT primary-mirror focusers) avoid it for most of the run.
         /// </summary>
         public bool ReverseInitialDirection { get; set; }
+
+        /// <summary>
+        /// OSC only, display only. When true and the frame is bayered, each full-frame AF exposure also measures the
+        /// luminance-accepted stars' HFR in the R, G and B planes and fits a curve per channel, so the chart can show
+        /// longitudinal chromatic focus spread. Never feeds the luminance fit, rejection, windowing or final position.
+        /// </summary>
+        public bool MeasureColorChannels { get; set; }
         public int MaxOutlierRejections { get; set; }
         public double OutlierRejectionConfidence { get; set; }
         public bool WeightedHyperbolicFitEnabled { get; set; }

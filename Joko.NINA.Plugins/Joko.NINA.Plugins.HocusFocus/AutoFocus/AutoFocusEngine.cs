@@ -3039,6 +3039,7 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                 FocuserOffset = autoFocusOptions.FocuserOffset,
                 MaxBlindStepsPerDirection = autoFocusOptions.MaxBlindStepsPerDirection,
                 ReverseInitialDirection = autoFocusOptions.ReverseInitialDirection,
+                MeasureColorChannels = autoFocusOptions.MeasureColorChannels,
                 MaxOutlierRejections = autoFocusOptions.MaxOutlierRejections,
                 OutlierRejectionConfidence = autoFocusOptions.OutlierRejectionConfidence,
                 WeightedHyperbolicFitEnabled = autoFocusOptions.WeightedHyperbolicFitEnabled,
