@@ -75,6 +75,9 @@ public class AutoFocusReplayReportTests {
         };
     }
 
+    private static string[] NinaReportFiles() =>
+        Directory.Exists(HocusFocusVM.ReportDirectory) ? Directory.GetFiles(HocusFocusVM.ReportDirectory) : Array.Empty<string>();
+
     // The replay completion handlers are private event handlers; invoke them the way the engine's Completed event
     // would. Asserting the method exists also pins that the replay paths still have a report-writing handler at all.
     private static void RaiseCompletedReplay(object vm, AutoFocusCompletedEventArgs e) {
@@ -194,11 +197,15 @@ public class AutoFocusReplayReportTests {
         var vm = bundle.BuildHocusFocusVM();
         var saveFolder = Path.Combine(tempRoot, "AutoFocus_pane_replay");
         Directory.CreateDirectory(saveFolder);
+        var ninaReportsBefore = NinaReportFiles();
 
         RaiseCompletedReplay(vm, CompletedArgs(saveFolder, regionCount: 1));
 
         Assert.Multiple(() => {
             Assert.That(File.Exists(ReportPath(saveFolder, "attempt01", 0)), Is.True);
+            // NINA core lists every file in its report directory as an auto-focus run: a replay must not add one
+            // (it used to, which is also how this test leaked fake reports into the developer's real NINA list).
+            Assert.That(NinaReportFiles().Except(ninaReportsBefore), Is.Empty, "a replay must not write into NINA's report directory");
             bundle.FocuserMediator.DidNotReceive().BroadcastSuccessfulAutoFocusRun(Arg.Any<NINA.Equipment.Interfaces.Mediator.AutoFocusInfo>());
             // The pane keeps showing the report of the run that actually moved the focuser.
             Assert.That(vm.LastReport, Is.Null, "a replay must not overwrite LastReport");

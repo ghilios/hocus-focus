@@ -761,7 +761,8 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
             DataPoint finalFocusPoint,
             ReportAutoFocusPoint lastAutoFocusPoint,
             StarDetectionRegion region,
-            TimeSpan duration) {
+            TimeSpan duration,
+            bool writeToReportDirectory = true) {
             var temperature = focuserMediator.GetInfo().Temperature;
             var fittings = new AutoFocusFitting() {
                 GaussianFitting = GaussianFitting,
@@ -790,8 +791,9 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                 duration: duration,
                 acceptedStarCountMin: AcceptedStarCountMin,
                 acceptedStarCountMax: AcceptedStarCountMax,
-                colorChannels: colorChannels);
-            if (report != null) {
+                colorChannels: colorChannels,
+                writeToReportDirectory: writeToReportDirectory);
+            if (report != null && writeToReportDirectory) {
                 MarkReportGenerated(report.Timestamp);
             }
             return report;
@@ -851,7 +853,8 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
             TimeSpan duration,
             int acceptedStarCountMin = -1,
             int acceptedStarCountMax = -1,
-            AutoFocusColorChannels colorChannels = null) {
+            AutoFocusColorChannels colorChannels = null,
+            bool writeToReportDirectory = true) {
             try {
                 var report = HocusFocusReport.GenerateReport(
                     profileService,
@@ -873,6 +876,11 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                     acceptedStarCountMax,
                     colorChannels
                 );
+                // writeToReportDirectory = false builds the report without publishing it: NINA core lists every file
+                // in ReportDirectory as an auto-focus run, so a re-analysis must not land there.
+                if (!writeToReportDirectory) {
+                    return report;
+                }
 
                 var reportText = JsonConvert.SerializeObject(report, Formatting.Indented);
                 string path = Path.Combine(ReportDirectory, $"{DateTime.Now:yyyy-MM-dd--HH-mm-ss}--{profileService.ActiveProfile.Id}.json");
@@ -1326,7 +1334,8 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                     finalFocusPoint: FinalFocusPoint,
                     lastAutoFocusPoint: LastAutoFocusPoint,
                     region: firstRegion.Region,
-                    duration: e.Duration);
+                    duration: e.Duration,
+                    writeToReportDirectory: false);
                 SaveRegionReport(e.SaveFolder, e.Iteration, report);
             } catch (Exception ex) {
                 Logger.Error(ex, $"Failed to save the reprocessed AutoFocus report to {e.SaveFolder}");
