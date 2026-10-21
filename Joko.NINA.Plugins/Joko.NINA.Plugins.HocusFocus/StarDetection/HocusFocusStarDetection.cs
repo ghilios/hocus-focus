@@ -198,6 +198,14 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection {
         [JsonIgnore]
         public DebugData DebugData { get; set; }
 
+        /// <summary>
+        /// The final star list behind <see cref="StarDetectionResult.StarList"/> (post ROI crop, outlier rejection and
+        /// AF-star selection), with the bounding boxes and background the per-colour-channel focus curves re-measure.
+        /// In-memory only: null on a result reloaded from disk.
+        /// </summary>
+        [JsonIgnore]
+        internal IReadOnlyList<Star> FinalStars { get; set; }
+
         public StarDetectorPSFFitType PSFType { get; set; } = StarDetectorPSFFitType.Moffat_40;
         public double PSFRSquared { get; set; } = double.NaN;
         public double Sigma { get; set; } = double.NaN;
@@ -786,6 +794,7 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection {
 
             // TODO: Consider whether to remove the ordering to get reproducibility between runs
             result.StarList = starList.Select(s => ToDetectedStar(s)).OrderBy(s => s.Position.Y * imageSize.Width + s.Position.X).ToList();
+            result.FinalStars = starList;
             // Aggregate the per-frame HFR over the saturated-filtered subset: a partially-saturated bright star stays
             // counted and in StarList/StarCenters, but its flat-core HFR (biased high by design) is kept out of the
             // curve point when enough unsaturated stars remain. When nothing is saturated this is the full starList,

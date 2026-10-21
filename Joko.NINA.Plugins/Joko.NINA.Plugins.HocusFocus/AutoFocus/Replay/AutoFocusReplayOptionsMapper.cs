@@ -71,6 +71,9 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus.Replay {
             options.ReducedChiSquaredRejectionThreshold = snapshot.ReducedChiSquaredRejectionThreshold;
             options.MaxBlindStepsPerDirection = snapshot.MaxBlindStepsPerDirection;
             options.SymmetricFocusWindowEnabled = snapshot.SymmetricFocusWindowEnabled;
+            if (snapshot.MeasureColorChannels.HasValue) {
+                options.MeasureColorChannels = snapshot.MeasureColorChannels.Value;
+            }
         }
 
         /// <summary>Captures the fit/method fields of an engine options bundle into a serializable snapshot.</summary>
@@ -96,7 +99,8 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus.Replay {
                 FitRejectionCriterion = options.FitRejectionCriterion,
                 ReducedChiSquaredRejectionThreshold = options.ReducedChiSquaredRejectionThreshold,
                 MaxBlindStepsPerDirection = options.MaxBlindStepsPerDirection,
-                SymmetricFocusWindowEnabled = options.SymmetricFocusWindowEnabled
+                SymmetricFocusWindowEnabled = options.SymmetricFocusWindowEnabled,
+                MeasureColorChannels = options.MeasureColorChannels
             };
         }
 

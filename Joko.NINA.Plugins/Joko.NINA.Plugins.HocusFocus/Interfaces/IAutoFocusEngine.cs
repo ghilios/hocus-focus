@@ -133,6 +133,15 @@ namespace NINA.Joko.Plugins.HocusFocus.Interfaces {
         /// backlash compensation fires on decreasing moves (e.g. SCT primary-mirror focusers) avoid it for most of the run.
         /// </summary>
         public bool ReverseInitialDirection { get; set; }
+
+        /// <summary>
+        /// OSC only, display only. When true and the frame is bayered, each full-frame AF exposure also measures the
+        /// luminance-accepted stars' HFR in the R, G and B planes and fits a curve per channel, so the chart can show
+        /// longitudinal chromatic focus spread. Never feeds the luminance fit, rejection, windowing or final position.
+        /// Not set by <c>GetOptions</c>: only the AF pane (<c>HocusFocusVM</c>), which charts the curves, opts in, and
+        /// the engine further restricts it to single-region runs.
+        /// </summary>
+        public bool MeasureColorChannels { get; set; }
         public int MaxOutlierRejections { get; set; }
         public double OutlierRejectionConfidence { get; set; }
         public bool WeightedHyperbolicFitEnabled { get; set; }
@@ -286,6 +295,36 @@ namespace NINA.Joko.Plugins.HocusFocus.Interfaces {
         public MeasureAndError Measurement { get; set; }
     }
 
+    /// <summary>Index of each colour channel in <see cref="AutoFocusColorChannels.Channels"/>.</summary>
+    public enum ColorChannel {
+        Red = 0,
+        Green = 1,
+        Blue = 2
+    }
+
+    /// <summary>One colour channel's focus curve from an OSC run with <see cref="AutoFocusEngineOptions.MeasureColorChannels"/>.</summary>
+    public class AutoFocusColorChannelCurve {
+        /// <summary>The channel's fit; null until it has three valid points.</summary>
+        public AutoFocusFitting Fittings { get; set; }
+        public AutoFocusRegionPoint[] Points { get; set; }
+
+        /// <summary>
+        /// Channel optimum minus the luminance optimum, in focuser steps. Null before finalization and when the
+        /// channel's fit is missing, fails the run's fit-quality gate, or lands outside the channel's measured range.
+        /// </summary>
+        public int? FocusDelta { get; set; }
+    }
+
+    /// <summary>
+    /// Per-colour-channel focus curves for one region. Display only: never an input to the luminance auto-focus.
+    /// </summary>
+    public class AutoFocusColorChannels {
+        /// <summary>R, G, B — indexed by <see cref="ColorChannel"/>.</summary>
+        public AutoFocusColorChannelCurve[] Channels { get; set; }
+
+        public AutoFocusColorChannelCurve this[ColorChannel channel] => Channels[(int)channel];
+    }
+
     public class AutoFocusRegionResult {
         public int RegionIndex { get; set; }
         public StarDetectionRegion Region { get; set; }
@@ -294,6 +333,9 @@ namespace NINA.Joko.Plugins.HocusFocus.Interfaces {
         public double EstimatedFinalHFR { get; set; }
         public AutoFocusRegionPoint[] RejectedPoints { get; set; }
         public AutoFocusRegionPoint[] WindowExcludedPoints { get; set; }
+
+        /// <summary>Null unless the run measured colour channels.</summary>
+        public AutoFocusColorChannels ColorChannels { get; set; }
     }
 
     public class AutoFocusResult {
@@ -325,6 +367,9 @@ namespace NINA.Joko.Plugins.HocusFocus.Interfaces {
         public AutoFocusFitting Fittings { get; set; }
         public AutoFocusRegionPoint[] RejectedPoints { get; set; }
         public AutoFocusRegionPoint[] WindowExcludedPoints { get; set; }
+
+        /// <summary>Null unless the run measures colour channels.</summary>
+        public AutoFocusColorChannels ColorChannels { get; set; }
     }
 
     public class AutoFocusSubMeasurementPointCompletedEventArgs : EventArgs {
@@ -345,6 +390,9 @@ namespace NINA.Joko.Plugins.HocusFocus.Interfaces {
         public AutoFocusFitting Fittings { get; set; }
         public AutoFocusRegionPoint[] RejectedPoints { get; set; }
         public AutoFocusRegionPoint[] WindowExcludedPoints { get; set; }
+
+        /// <summary>Null unless the run measured colour channels.</summary>
+        public AutoFocusColorChannels ColorChannels { get; set; }
     }
 
     public class AutoFocusFinishedEventArgsBase : EventArgs {

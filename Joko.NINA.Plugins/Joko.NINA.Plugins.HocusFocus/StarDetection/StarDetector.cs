@@ -1278,27 +1278,42 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection {
             // Subtract the local background plane per pixel so a one-sided gradient does not bias HFR. Fall back
             // to a flat plane at the scalar background if no plane is available.
             var backgroundPlane = star.BackgroundPlane ?? LocalBackgroundPlane.Flat(star.Center.X, star.Center.Y, star.Background);
-            double totalBrightness = 0.0;
-            double totalWeightedDistance = 0.0;
-
-            // Circular aperture radius — same convention as centroid refinement
-            var apertureRadius = Math.Min(star.StarBoundingBox.Width, star.StarBoundingBox.Height) / 2.0;
-
-            // Determine the start position to sample from the star bounding box so that we stay within the box *and* the center point is one of the samples. This ensures
-            // we're sampling in a balanced manner around the center
-            var startX = star.Center.X - p.AnalysisSamplingSize * Math.Floor((star.Center.X - star.StarBoundingBox.Left) / p.AnalysisSamplingSize);
-            var startY = star.Center.Y - p.AnalysisSamplingSize * Math.Floor((star.Center.Y - star.StarBoundingBox.Top) / p.AnalysisSamplingSize);
-            var endX = star.StarBoundingBox.Right;
-            var endY = star.StarBoundingBox.Bottom;
             // Donut-aware clip (mirrors ComputeStarParameters): cap the per-pixel HFR clip for EXTENDED candidates
             // so the full thin ring — not just its brightest arc — feeds the HFR flux sum, keeping the recovered
             // donuts' HFR consistent with their flux/centroid. Verbatim when the master is off or the candidate is
             // small ⇒ bit-identical.
             var noiseThreshold = EffectiveClipMultiplier(p, Math.Max(star.StarBoundingBox.Width, star.StarBoundingBox.Height)) * noiseSigma;
-            for (var y = startY; y <= endY; y += p.AnalysisSamplingSize) {
-                for (var x = startX; x <= endX; x += p.AnalysisSamplingSize) {
-                    var dx = x - star.Center.X;
-                    var dy = y - star.Center.Y;
+            var hfr = ComputeApertureHfr(srcImage, star.Center, star.StarBoundingBox, backgroundPlane, noiseThreshold, p.AnalysisSamplingSize, p.HfrTauPolicy);
+            if (double.IsNaN(hfr)) {
+                return false;
+            }
+            star.HFR = hfr;
+            return true;
+        }
+
+        /// <summary>
+        /// The HFR aperture sum behind <see cref="MeasureStar"/>, factored out so the per-colour-channel focus curves
+        /// (<see cref="ColorChannelHfr"/>) measure a luminance-accepted star on an R/G/B plane with exactly the same
+        /// sampling grid, aperture and τ policy. Returns NaN when no pixel survives the clip.
+        /// </summary>
+        internal static double ComputeApertureHfr(Mat srcImage, Point2d center, Rect boundingBox, LocalBackgroundPlane backgroundPlane,
+            double noiseThreshold, float analysisSamplingSize, TauClipPolicy hfrTauPolicy) {
+            double totalBrightness = 0.0;
+            double totalWeightedDistance = 0.0;
+
+            // Circular aperture radius — same convention as centroid refinement
+            var apertureRadius = Math.Min(boundingBox.Width, boundingBox.Height) / 2.0;
+
+            // Determine the start position to sample from the star bounding box so that we stay within the box *and* the center point is one of the samples. This ensures
+            // we're sampling in a balanced manner around the center
+            var startX = center.X - analysisSamplingSize * Math.Floor((center.X - boundingBox.Left) / analysisSamplingSize);
+            var startY = center.Y - analysisSamplingSize * Math.Floor((center.Y - boundingBox.Top) / analysisSamplingSize);
+            var endX = boundingBox.Right;
+            var endY = boundingBox.Bottom;
+            for (var y = startY; y <= endY; y += analysisSamplingSize) {
+                for (var x = startX; x <= endX; x += analysisSamplingSize) {
+                    var dx = x - center.X;
+                    var dy = y - center.Y;
                     var distance = Math.Sqrt(dx * dx + dy * dy);
 
                     // Exclude pixels entirely outside the circular aperture
@@ -1312,7 +1327,7 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection {
                         // SubtractTau preserves the legacy soft-threshold (flux − τ): identical gating, but wing
                         // pixels lose relative weight, biasing HFR low on radial gradients (F3). GateOnly keeps
                         // the full flux of surviving pixels, matching the centroid's gate-only convention.
-                        var value = p.HfrTauPolicy == TauClipPolicy.SubtractTau ? flux - noiseThreshold : flux;
+                        var value = hfrTauPolicy == TauClipPolicy.SubtractTau ? flux - noiseThreshold : flux;
                         // Apply partial-pixel weighting at the aperture boundary (linear interpolation)
                         var apertureWeight = 1.0 - Math.Max(0.0, distance - (apertureRadius - 0.5));
                         totalWeightedDistance += apertureWeight * value * distance;
@@ -1322,10 +1337,9 @@ namespace NINA.Joko.Plugins.HocusFocus.StarDetection {
             }
 
             if (totalBrightness > 0.0d) {
-                star.HFR = totalWeightedDistance / totalBrightness;
-                return true;
+                return totalWeightedDistance / totalBrightness;
             }
-            return false;
+            return double.NaN;
         }
 
         private void EvaluateGlobalMetrics(Mat srcImage, StarDetectorParams p, StarDetectorMetrics metrics) {

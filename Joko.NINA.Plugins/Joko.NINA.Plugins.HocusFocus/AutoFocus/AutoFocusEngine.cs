@@ -108,11 +108,14 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
             // populates it.
             public ImmutableList<ScatterErrorPoint> WindowExcludedPoints { get; private set; }
 
+            /// <param name="hyperbolicFitModel">The hyperbolic model to fit; null uses the run's option. The colour-channel
+            /// curves pass the concrete model luminance selected so every channel is fitted with the same shape.</param>
             public static CurveFittingResult Calculate(
                 AutoFocusState state,
                 AFMethodEnum method,
                 AFCurveFittingEnum fitting,
-                List<ScatterErrorPoint> focusPoints) {
+                List<ScatterErrorPoint> focusPoints,
+                HyperbolicFitModel? hyperbolicFitModel = null) {
                 // Canonicalize point order (by focuser position) so the fit and its iterative Grubbs outlier
                 // rejection are independent of the order measurements arrive in. During replay the points
                 // complete concurrently, so MeasurementsByFocuserPoint (a Dictionary) enumerates them in
@@ -155,7 +158,7 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                             }
 
                             if (AFCurveFittingEnum.HYPERBOLIC == fitting || AFCurveFittingEnum.TRENDHYPERBOLIC == fitting) {
-                                var hf = AlglibHyperbolicFitting.Create(state.AlglibAPI, state.Options.HyperbolicFitModel, validFocusPoints, state.Options.AutoFocusStepSize, state.Options.WeightedHyperbolicFitEnabled);
+                                var hf = AlglibHyperbolicFitting.Create(state.AlglibAPI, hyperbolicFitModel ?? state.Options.HyperbolicFitModel, validFocusPoints, state.Options.AutoFocusStepSize, state.Options.WeightedHyperbolicFitEnabled);
                                 if (!hf.Solve()) {
                                     Logger.Error("Hyperbolic fit failed");
                                 } else {
@@ -218,8 +221,12 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
             // RejectedPoints (Grubbs outliers). Stays empty until Behavior A fills it.
             public Dictionary<int, MeasureAndError> WindowExcludedPoints { get; private set; } = new Dictionary<int, MeasureAndError>();
 
+            // R/G/B focus curves (display only); empty unless the run measures colour channels.
+            public ColorChannelCurves ColorChannels { get; } = new ColorChannelCurves();
+
             public void ResetMeasurements() {
                 lock (SubMeasurementsLock) {
+                    this.ColorChannels.Reset();
                     this.MeasurementsByFocuserPoint.Clear();
                     this.SubMeasurementsByFocuserPoints.Clear();
                     this.RejectedPoints.Clear();
@@ -270,6 +277,19 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
 
             public void CalculateFinalFocusPoint() {
                 this.FinalFocusPoint = DetermineFinalFocusPoint();
+            }
+
+            /// <summary>
+            /// Fits the colour-channel curves against the finalized luminance run. Call after
+            /// <see cref="CalculateFinalFocusPoint"/>; a no-op when the run measured no colour channels.
+            /// </summary>
+            public void FinalizeColorChannels(double rSquaredThreshold) {
+                lock (SubMeasurementsLock) {
+                    if (!ColorChannels.HasData) {
+                        return;
+                    }
+                    ColorChannels.FinalizeFits(State, Fittings, WindowExcludedPoints.Keys.ToList(), FinalFocusPoint, rSquaredThreshold);
+                }
             }
 
             /// <summary>
@@ -415,45 +435,194 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
 
             private DataPoint? DetermineFinalFocusPoint() {
                 using (MyStopWatch.Measure()) {
-                    var method = Fittings.Method;
-                    var fitting = Fittings.CurveFittingType;
-
-                    if (method == AFMethodEnum.STARHFR) {
-                        if (fitting == AFCurveFittingEnum.TRENDLINES) {
-                            return Fittings.TrendlineFitting?.Intersection;
-                        }
-
-                        if (fitting == AFCurveFittingEnum.HYPERBOLIC) {
-                            return Fittings.HyperbolicFitting?.Minimum;
-                        }
-
-                        if (fitting == AFCurveFittingEnum.PARABOLIC) {
-                            return Fittings.QuadraticFitting?.Minimum;
-                        }
-
-                        if (fitting == AFCurveFittingEnum.TRENDPARABOLIC) {
-                            if (Fittings.TrendlineFitting == null || Fittings.QuadraticFitting == null) {
-                                return null;
-                            }
-
-                            return new DataPoint(Math.Round((Fittings.TrendlineFitting.Intersection.X + Fittings.QuadraticFitting.Minimum.X) / 2), (Fittings.TrendlineFitting.Intersection.Y + Fittings.QuadraticFitting.Minimum.Y) / 2);
-                        }
-
-                        if (fitting == AFCurveFittingEnum.TRENDHYPERBOLIC) {
-                            if (Fittings.TrendlineFitting == null || Fittings.HyperbolicFitting == null) {
-                                return null;
-                            }
-
-                            return new DataPoint(Math.Round((Fittings.TrendlineFitting.Intersection.X + Fittings.HyperbolicFitting.Minimum.X) / 2), (Fittings.TrendlineFitting.Intersection.Y + Fittings.HyperbolicFitting.Minimum.Y) / 2);
-                        }
-
-                        Logger.Error($"Invalid AutoFocus Fitting {fitting} for method {method}");
-                        return new DataPoint();
-                    } else {
-                        return Fittings.GaussianFitting?.Maximum;
-                    }
+                    return DetermineFinalFocusPoint(Fittings);
                 }
             }
+
+            internal static DataPoint? DetermineFinalFocusPoint(AutoFocusFitting fittings) {
+                var method = fittings.Method;
+                var fitting = fittings.CurveFittingType;
+
+                if (method == AFMethodEnum.STARHFR) {
+                    if (fitting == AFCurveFittingEnum.TRENDLINES) {
+                        return fittings.TrendlineFitting?.Intersection;
+                    }
+
+                    if (fitting == AFCurveFittingEnum.HYPERBOLIC) {
+                        return fittings.HyperbolicFitting?.Minimum;
+                    }
+
+                    if (fitting == AFCurveFittingEnum.PARABOLIC) {
+                        return fittings.QuadraticFitting?.Minimum;
+                    }
+
+                    if (fitting == AFCurveFittingEnum.TRENDPARABOLIC) {
+                        if (fittings.TrendlineFitting == null || fittings.QuadraticFitting == null) {
+                            return null;
+                        }
+
+                        return new DataPoint(Math.Round((fittings.TrendlineFitting.Intersection.X + fittings.QuadraticFitting.Minimum.X) / 2), (fittings.TrendlineFitting.Intersection.Y + fittings.QuadraticFitting.Minimum.Y) / 2);
+                    }
+
+                    if (fitting == AFCurveFittingEnum.TRENDHYPERBOLIC) {
+                        if (fittings.TrendlineFitting == null || fittings.HyperbolicFitting == null) {
+                            return null;
+                        }
+
+                        return new DataPoint(Math.Round((fittings.TrendlineFitting.Intersection.X + fittings.HyperbolicFitting.Minimum.X) / 2), (fittings.TrendlineFitting.Intersection.Y + fittings.HyperbolicFitting.Minimum.Y) / 2);
+                    }
+
+                    Logger.Error($"Invalid AutoFocus Fitting {fitting} for method {method}");
+                    return new DataPoint();
+                } else {
+                    return fittings.GaussianFitting?.Maximum;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Per-colour-channel (R, G, B) focus curves for one region of an OSC run with
+        /// <see cref="AutoFocusEngineOptions.MeasureColorChannels"/>. Display only: it mirrors the luminance per-point
+        /// pooling and fitting but never touches the region's luminance fittings, rejected/window-excluded sets or
+        /// final point. Every member is called under the owning region's <c>SubMeasurementsLock</c>.
+        /// </summary>
+        private sealed class ColorChannelCurves {
+            private const int ChannelCount = 3;
+
+            private readonly Dictionary<int, List<MeasureAndError>>[] subMeasurementsByFocuserPoint = NewPerChannel(() => new Dictionary<int, List<MeasureAndError>>());
+            private readonly Dictionary<int, MeasureAndError>[] measurementsByFocuserPoint = NewPerChannel(() => new Dictionary<int, MeasureAndError>());
+            private readonly AutoFocusFitting[] fittings = new AutoFocusFitting[ChannelCount];
+            private readonly int?[] focusDeltas = new int?[ChannelCount];
+
+            private static T[] NewPerChannel<T>(Func<T> create) => Enumerable.Range(0, ChannelCount).Select(_ => create()).ToArray();
+
+            public bool HasData => measurementsByFocuserPoint.Any(m => m.Count > 0);
+
+            public void Reset() {
+                for (var c = 0; c < ChannelCount; c++) {
+                    subMeasurementsByFocuserPoint[c].Clear();
+                    measurementsByFocuserPoint[c].Clear();
+                    fittings[c] = null;
+                    focusDeltas[c] = null;
+                }
+            }
+
+            public void AddSubMeasurement(int focuserPosition, MeasureAndError[] measures) {
+                for (var c = 0; c < ChannelCount; c++) {
+                    if (!subMeasurementsByFocuserPoint[c].TryGetValue(focuserPosition, out var values)) {
+                        values = new List<MeasureAndError>();
+                        subMeasurementsByFocuserPoint[c].Add(focuserPosition, values);
+                    }
+                    values.Add(measures[c]);
+                }
+            }
+
+            /// <summary>
+            /// Completes the channel points at <paramref name="focuserPosition"/> from whatever frames carried channel
+            /// data, at the moment the luminance point completes — so both pool the same frames. Returns true when a
+            /// new point was added.
+            /// </summary>
+            public bool CompletePoint(int focuserPosition) {
+                var added = false;
+                for (var c = 0; c < ChannelCount; c++) {
+                    if (subMeasurementsByFocuserPoint[c].TryGetValue(focuserPosition, out var values) && values.Count > 0
+                        && TryCompleteFocuserPoint(measurementsByFocuserPoint[c], focuserPosition, values, out _)) {
+                        added = true;
+                    }
+                }
+                return added;
+            }
+
+            private List<ScatterErrorPoint> FocusPoints(int channel, ICollection<int> excludedPositions = null) {
+                return measurementsByFocuserPoint[channel]
+                    .Where(fp => excludedPositions == null || !excludedPositions.Contains(fp.Key))
+                    .Select(fp => new ScatterErrorPoint(fp.Key, fp.Value.Measure, 0, SafeDisplayError(fp.Value.Stdev)))
+                    .ToList();
+            }
+
+            /// <summary>Live per-point refit with the run's method, fitting type and model option.</summary>
+            public void UpdateLiveFits(AutoFocusState state, AFMethodEnum method, AFCurveFittingEnum fitting) {
+                for (var c = 0; c < ChannelCount; c++) {
+                    fittings[c] = CurveFittingResult.Calculate(state, method, fitting, FocusPoints(c))?.Fittings;
+                }
+            }
+
+            /// <summary>
+            /// Final per-channel fit and focus delta. Uses the luminance run's choices rather than making its own: the
+            /// points the luminance symmetric window excluded are excluded here too, and a hyperbolic fit uses the
+            /// concrete model luminance selected. A channel gets a delta only when its fit passes the same quality
+            /// gate the luminance fit must pass and its optimum lies inside its measured range.
+            /// </summary>
+            public void FinalizeFits(AutoFocusState state, AutoFocusFitting luminanceFittings, ICollection<int> windowExcludedPositions,
+                DataPoint? luminanceFocusPoint, double rSquaredThreshold) {
+                for (var c = 0; c < ChannelCount; c++) {
+                    focusDeltas[c] = null;
+                    var points = FocusPoints(c, windowExcludedPositions);
+                    var channelFittings = CurveFittingResult.Calculate(state, luminanceFittings.Method, luminanceFittings.CurveFittingType, points,
+                        hyperbolicFitModel: luminanceFittings.SelectedHyperbolicFitModel)?.Fittings;
+                    if (channelFittings != null) {
+                        channelFittings.SelectedHyperbolicFitModel = luminanceFittings.SelectedHyperbolicFitModel;
+                    }
+                    fittings[c] = channelFittings;
+                    if (channelFittings == null || luminanceFocusPoint == null) {
+                        continue;
+                    }
+                    var acceptable = IsColorChannelFitAcceptable(channelFittings, state.Options.FitRejectionCriterion, rSquaredThreshold,
+                        state.Options.ReducedChiSquaredRejectionThreshold);
+                    var focusPoint = AutoFocusRegionState.DetermineFinalFocusPoint(channelFittings);
+                    if (!acceptable || focusPoint == null || points.Count == 0
+                        || focusPoint.Value.X < points.Min(p => p.X) || focusPoint.Value.X > points.Max(p => p.X)) {
+                        continue;
+                    }
+                    focusDeltas[c] = (int)Math.Round(focusPoint.Value.X - luminanceFocusPoint.Value.X);
+                }
+            }
+
+            public AutoFocusColorChannels ToResult() {
+                if (!HasData) {
+                    return null;
+                }
+                return new AutoFocusColorChannels() {
+                    Channels = Enumerable.Range(0, ChannelCount).Select(c => new AutoFocusColorChannelCurve() {
+                        Fittings = fittings[c]?.Clone(),
+                        Points = measurementsByFocuserPoint[c].OrderBy(p => p.Key)
+                            .Select(p => new AutoFocusRegionPoint() { FocuserPosition = p.Key, Measurement = p.Value }).ToArray(),
+                        FocusDelta = focusDeltas[c]
+                    }).ToArray()
+                };
+            }
+        }
+
+        /// <summary>
+        /// The quality gate <see cref="ValidateCalculatedFocusPosition"/> applies to a luminance fit, as a predicate,
+        /// for a colour-channel fit: the hyperbolic criterion (R² or reduced χ²) for hyperbolic fittings, and the R²
+        /// threshold for the quadratic and trendline components the fitting type uses.
+        /// </summary>
+        internal static bool IsColorChannelFitAcceptable(AutoFocusFitting fittings, FitRejectionCriterion criterion, double rSquaredThreshold, double reducedChiSquaredThreshold) {
+            var fitting = fittings.CurveFittingType;
+            if (fitting == AFCurveFittingEnum.HYPERBOLIC || fitting == AFCurveFittingEnum.TRENDHYPERBOLIC) {
+                var hyperbolicFitting = fittings.HyperbolicFitting;
+                if (hyperbolicFitting == null) {
+                    return false;
+                }
+                var reducedChiSquared = (hyperbolicFitting as AlglibHyperbolicFitting)?.ReducedChiSquared ?? double.NaN;
+                if (!IsHyperbolicFitAcceptable(criterion, hyperbolicFitting.RSquared, reducedChiSquared, rSquaredThreshold, reducedChiSquaredThreshold)) {
+                    return false;
+                }
+            }
+            if (rSquaredThreshold > 0) {
+                if ((fitting == AFCurveFittingEnum.PARABOLIC || fitting == AFCurveFittingEnum.TRENDPARABOLIC)
+                    && fittings.QuadraticFitting != null && fittings.QuadraticFitting.RSquared < rSquaredThreshold) {
+                    return false;
+                }
+                var trendlineBad = (fittings.TrendlineFitting?.LeftTrend != null && fittings.TrendlineFitting.LeftTrend.RSquared < rSquaredThreshold)
+                    || (fittings.TrendlineFitting?.RightTrend != null && fittings.TrendlineFitting.RightTrend.RSquared < rSquaredThreshold);
+                if ((fitting == AFCurveFittingEnum.TRENDLINES || fitting == AFCurveFittingEnum.TRENDHYPERBOLIC || fitting == AFCurveFittingEnum.TRENDPARABOLIC)
+                    && trendlineBad) {
+                    return false;
+                }
+            }
+            return true;
         }
 
         private class AutoFocusImageState : IDisposable {
@@ -489,6 +658,10 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
             }
 
             public IRenderedImage PreservedExposure { get; set; }
+
+            // This frame's R/G/B HFR (indexed by ColorChannel), or null when the run doesn't measure colour channels or
+            // the frame couldn't be measured. Only single-region runs measure them, so one field serves the frame.
+            public MeasureAndError[] ColorChannelMeasures { get; set; }
 
             private bool measurementStarted = false;
             private readonly AutoFocusState state;
@@ -695,6 +868,9 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
             // Region index that tripped the last validation failure (HFR-improvement checks), so the metadata.json
             // FailureReason can name it. Null when the failure has no single associated region.
             public int? LastFailureRegionIndex { get; set; } = null;
+
+            // 1 once the run has logged why it can't measure colour channels, so a whole sweep logs it once.
+            public int ColorChannelsUnavailableLogged;
 
             public List<Task> InitialHFRTasks { get; private set; } = new List<Task>();
             public List<Task> AnalysisTasks { get; private set; } = new List<Task>();
@@ -903,6 +1079,10 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                 // live/replay discriminator.
                 MaybeDisplayAutoFocusAnnotation(state, regionState, image, analysisParams, analysisResult, isLiveRun: cacheSource == null, token: token);
 
+                if (ShouldMeasureColorChannels(state)) {
+                    imageState.ColorChannelMeasures = MeasureColorChannels(state, image, analysisResult);
+                }
+
                 Logger.Debug($"Current Focus - Position: {imageState.FocuserPosition}, HFR: {analysisResult.AverageHFR}");
                 return new MeasureAndError() { Measure = analysisResult.AverageHFR, Stdev = analysisResult.HFRStdDev };
             } else {
@@ -922,6 +1102,69 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                 }
                 var analysisResult = await analysis.Measure(image, analysisParams, progress: null, token);
                 return new MeasureAndError() { Measure = analysisResult.AverageContrast, Stdev = analysisResult.ContrastStdev };
+            }
+        }
+
+        /// <summary>
+        /// Colour channels are measured only for a STARHFR run that opted in and has a single region — the AF pane's
+        /// chart series. Multi-region (Inspector) runs never measure them.
+        /// </summary>
+        private static bool ShouldMeasureColorChannels(AutoFocusState state) {
+            return state.Options.MeasureColorChannels
+                && state.Options.AutoFocusMethod == AFMethodEnum.STARHFR
+                && state.FocusRegionStates.Count == 1;
+        }
+
+        /// <summary>
+        /// This frame's R/G/B HFR, re-measuring the luminance pass's final stars on each debayered plane. Returns null
+        /// — logged once per run at Info, never failing the AF — when the frame isn't bayered, the CFA pattern can't
+        /// be resolved, or the detection result carries no star geometry (another detector, or a result reused from
+        /// disk).
+        /// </summary>
+        private MeasureAndError[] MeasureColorChannels(AutoFocusState state, IRenderedImage image, StarDetectionResult analysisResult) {
+            if (!image.RawImageData.Properties.IsBayered) {
+                LogColorChannelsUnavailable(state, "the frame is not bayered");
+                return null;
+            }
+            if (!(analysisResult is HocusFocusStarDetectionResult hfResult) || hfResult.FinalStars == null || hfResult.DetectorParams == null) {
+                LogColorChannelsUnavailable(state, "the star detection result carries no star geometry (another detector, or a result reused from disk)");
+                return null;
+            }
+
+            SensorType bayerPattern;
+            if (image is IDebayeredImage debayeredImage) {
+                bayerPattern = debayeredImage.BayerPattern;
+            } else {
+                try {
+                    bayerPattern = RenderedImageLoading.ResolveBayerPattern(image.RawImageData, profileService);
+                } catch (InvalidOperationException e) {
+                    LogColorChannelsUnavailable(state, e.Message);
+                    return null;
+                }
+            }
+
+            try {
+                return MeasureColorChannelPlanes(image, bayerPattern, hfResult.FinalStars, hfResult.DetectorParams);
+            } catch (Exception e) {
+                Logger.Error(e, "Failed to measure colour-channel HFR; the luminance auto-focus is unaffected");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// The pixel step of <see cref="MeasureColorChannels"/>: debayer to R/G/B planes and re-measure the stars on
+        /// each. A test seam (the sweep harness renders no pixels); every gate around it stays in the engine.
+        /// </summary>
+        internal Func<IRenderedImage, SensorType, IReadOnlyList<Star>, StarDetectorParams, MeasureAndError[]> MeasureColorChannelPlanes { get; set; } =
+            (image, bayerPattern, stars, detectorParams) => {
+                using (var channels = ColorChannelHfr.ExtractChannelMats(image.RawImageData, bayerPattern, detectorParams)) {
+                    return ColorChannelHfr.MeasureAll(channels, stars, detectorParams);
+                }
+            };
+
+        private static void LogColorChannelsUnavailable(AutoFocusState state, string reason) {
+            if (Interlocked.Exchange(ref state.ColorChannelsUnavailableLogged, 1) == 0) {
+                Logger.Info($"Not measuring colour-channel focus curves: {reason}");
             }
         }
 
@@ -1062,6 +1305,9 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                     regionState.SubMeasurementsByFocuserPoints.Add(focuserPosition, values);
                 }
                 values.Add(measurement);
+                if (imageState.ColorChannelMeasures != null) {
+                    regionState.ColorChannels.AddSubMeasurement(focuserPosition, imageState.ColorChannelMeasures);
+                }
                 if (values.Count < state.Options.FramesPerPoint) {
                     return Task.CompletedTask;
                 }
@@ -1076,6 +1322,9 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
 
                 var focusPoints = regionState.MeasurementsByFocuserPoint.Select(fp => new ScatterErrorPoint(fp.Key, fp.Value.Measure, 0, SafeDisplayError(fp.Value.Stdev))).ToList();
                 regionState.UpdateCurveFittings(focusPoints);
+                if (regionState.ColorChannels.CompletePoint(focuserPosition)) {
+                    regionState.ColorChannels.UpdateLiveFits(state, regionState.Fittings.Method, regionState.Fittings.CurveFittingType);
+                }
 
                 this.OnMeasurementPointCompleted(imageState, regionState, pooledMeasurement);
             }
@@ -1963,6 +2212,7 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
             // Region-0 fit center BEFORE the focuser offset is applied — the best estimate of focus, and the center a
             // re-centered retry should sweep around when this validation fails (see RunAutoFocus).
             var calculatedFocusPoint = firstRegionFinalFocusPosition;
+            autoFocusState.FocusRegionStates[0].FinalizeColorChannels(rSquaredThreshold);
 
             if (this.autoFocusOptions.FocuserOffset != 0) {
                 Logger.Info($"Applying focuser offset of {this.autoFocusOptions.FocuserOffset} to {firstRegionFinalFocusPosition}");
@@ -2227,7 +2477,8 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                         EstimatedFinalHFR = rs.FinalFocusPoint?.Y ?? double.NaN,
                         Fittings = rs.Fittings,
                         RejectedPoints = rs.RejectedPoints.Select(p => new AutoFocusRegionPoint() { FocuserPosition = p.Key, Measurement = p.Value }).ToArray(),
-                        WindowExcludedPoints = rs.WindowExcludedPoints.Select(p => new AutoFocusRegionPoint() { FocuserPosition = p.Key, Measurement = p.Value }).ToArray()
+                        WindowExcludedPoints = rs.WindowExcludedPoints.Select(p => new AutoFocusRegionPoint() { FocuserPosition = p.Key, Measurement = p.Value }).ToArray(),
+                        ColorChannels = rs.ColorChannels.ToResult()
                     }).OrderBy(r => r.RegionIndex).ToArray(),
                     SaveFolder = autoFocusState.SaveFolder
                 };
@@ -2723,6 +2974,7 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                     // Mirror the live Run path: compute best-focus stability so a replayed/loaded run shows LOO in
                     // the panel instead of NaN (uses the model resolved by SelectBestHyperbolicModel for Hybrid runs).
                     regionState.ComputeLeaveOneOutStability();
+                    regionState.FinalizeColorChannels(profileService.ActiveProfile.FocuserSettings.RSquaredThreshold);
                 }
 
                 OnCompleted(state, 0.0d, TimeSpan.Zero);
@@ -2738,7 +2990,8 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                         EstimatedFinalHFR = rs.FinalFocusPoint?.Y ?? double.NaN,
                         Fittings = rs.Fittings,
                         RejectedPoints = rs.RejectedPoints.Select(p => new AutoFocusRegionPoint() { FocuserPosition = p.Key, Measurement = p.Value }).ToArray(),
-                        WindowExcludedPoints = rs.WindowExcludedPoints.Select(p => new AutoFocusRegionPoint() { FocuserPosition = p.Key, Measurement = p.Value }).ToArray()
+                        WindowExcludedPoints = rs.WindowExcludedPoints.Select(p => new AutoFocusRegionPoint() { FocuserPosition = p.Key, Measurement = p.Value }).ToArray(),
+                        ColorChannels = rs.ColorChannels.ToResult()
                     }).OrderBy(r => r.RegionIndex).ToArray(),
                     SaveFolder = state.SaveFolder
                 };
@@ -2791,7 +3044,8 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                 Measurement = measurement,
                 Fittings = regionState.Fittings.Clone(),
                 RejectedPoints = regionState.RejectedPoints.Select(p => new AutoFocusRegionPoint() { FocuserPosition = p.Key, Measurement = p.Value }).ToArray(),
-                WindowExcludedPoints = regionState.WindowExcludedPoints.Select(p => new AutoFocusRegionPoint() { FocuserPosition = p.Key, Measurement = p.Value }).ToArray()
+                WindowExcludedPoints = regionState.WindowExcludedPoints.Select(p => new AutoFocusRegionPoint() { FocuserPosition = p.Key, Measurement = p.Value }).ToArray(),
+                ColorChannels = regionState.ColorChannels.ToResult()
             });
         }
 
@@ -2940,7 +3194,8 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                     FinalFocuserPosition = (int)Math.Round(s.FinalFocusPoint?.X ?? -1),
                     Fittings = s.Fittings,
                     RejectedPoints = s.RejectedPoints.Select(p => new AutoFocusRegionPoint() { FocuserPosition = p.Key, Measurement = p.Value }).ToArray(),
-                    WindowExcludedPoints = s.WindowExcludedPoints.Select(p => new AutoFocusRegionPoint() { FocuserPosition = p.Key, Measurement = p.Value }).ToArray()
+                    WindowExcludedPoints = s.WindowExcludedPoints.Select(p => new AutoFocusRegionPoint() { FocuserPosition = p.Key, Measurement = p.Value }).ToArray(),
+                    ColorChannels = s.ColorChannels.ToResult()
                 }).ToImmutableList();
             // Publish the run's FINAL HFR — a real exposure taken at the position the run settled on — as the
             // measured in-focus HFR the detection-binning recommendation reads. Deliberately NOT the fitted curve
@@ -2979,7 +3234,8 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                     FinalHFR = s.FinalHFR?.Measure,
                     EstimatedFinalFocuserPosition = s.FinalFocusPoint?.X ?? double.NaN,
                     FinalFocuserPosition = (int)Math.Round(s.FinalFocusPoint?.X ?? -1),
-                    Fittings = s.Fittings
+                    Fittings = s.Fittings,
+                    ColorChannels = s.ColorChannels.ToResult()
                 }).ToImmutableList();
             return new AutoFocusFailedEventArgs() {
                 Iteration = state.AttemptNumber,

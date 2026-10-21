@@ -14,6 +14,7 @@ using NINA.Core.Model;
 using NINA.Image.ImageAnalysis;
 using NINA.Image.Interfaces;
 using NINA.Joko.Plugins.HocusFocus.Interfaces;
+using NINA.Joko.Plugins.HocusFocus.StarDetection;
 using System;
 using System.Collections.Generic;
 using System.Threading;
@@ -40,6 +41,13 @@ namespace NINA.Joko.Plugins.HocusFocus.Tests.AutoFocus.Harness {
             this.ledger = ledger ?? throw new ArgumentNullException(nameof(ledger));
             this.scenario = scenario ?? throw new ArgumentNullException(nameof(scenario));
         }
+
+        /// <summary>
+        /// When true, frames come back as a <see cref="HocusFocusStarDetectionResult"/> carrying an (empty) final star
+        /// list and detector params — the shape the engine's colour-channel step requires. Off by default so every
+        /// other scenario sees exactly the plain result it always has.
+        /// </summary>
+        public bool ReturnHocusFocusResults { get; set; }
 
         public string Name => "Scripted (test)";
 
@@ -68,6 +76,17 @@ namespace NINA.Joko.Plugins.HocusFocus.Tests.AutoFocus.Harness {
 
             // AverageHFR/HFRStdDev must be set explicitly: StarDetectionResult defaults them to NaN, but the engine reads
             // Measure = AverageHFR and treats 0 as "no stars". starCount == 0 ⇒ hfr == 0 (the scenario guarantees this).
+            if (ReturnHocusFocusResults) {
+                return new HocusFocusStarDetectionResult {
+                    AverageHFR = hfr,
+                    HFRStdDev = sigma,
+                    DetectedStars = starCount,
+                    StarList = starList,
+                    Params = null,
+                    DetectorParams = new StarDetectorParams(),
+                    FinalStars = new List<Star>()
+                };
+            }
             return new StarDetectionResult {
                 AverageHFR = hfr,
                 HFRStdDev = sigma,

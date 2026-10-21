@@ -88,7 +88,8 @@ namespace NINA.Joko.Plugins.HocusFocus.Tests.AutoFocus.Replay {
                 ReducedChiSquaredRejectionThreshold = 2.7,
                 MaxBlindStepsPerDirection = 6,
                 // Non-default (the DTO defaults this true) so a broken Apply/Capture that drops it fails the round-trip.
-                SymmetricFocusWindowEnabled = false
+                SymmetricFocusWindowEnabled = false,
+                MeasureColorChannels = true
             };
             var snapshot = AutoFocusReplayOptionsMapper.Capture(source);
             var target = new AutoFocusEngineOptions();
@@ -113,7 +114,22 @@ namespace NINA.Joko.Plugins.HocusFocus.Tests.AutoFocus.Replay {
                 Assert.That(target.ReducedChiSquaredRejectionThreshold, Is.EqualTo(2.7));
                 Assert.That(target.MaxBlindStepsPerDirection, Is.EqualTo(6));
                 Assert.That(target.SymmetricFocusWindowEnabled, Is.EqualTo(false));
+                Assert.That(target.MeasureColorChannels, Is.EqualTo(true));
             });
+        }
+
+        [TestCase(true)]
+        [TestCase(false)]
+        public void Apply_SnapshotWithoutMeasureColorChannels_KeepsTheCurrentSetting(bool current) {
+            // Metadata written before the option existed deserializes it as null; replaying such a run must not
+            // silently flip the user's current choice.
+            var options = new AutoFocusEngineOptions() { MeasureColorChannels = current };
+            var snapshot = SampleSnapshot();
+            snapshot.MeasureColorChannels = null;
+
+            AutoFocusReplayOptionsMapper.Apply(options, snapshot);
+
+            Assert.That(options.MeasureColorChannels, Is.EqualTo(current));
         }
 
         [Test]

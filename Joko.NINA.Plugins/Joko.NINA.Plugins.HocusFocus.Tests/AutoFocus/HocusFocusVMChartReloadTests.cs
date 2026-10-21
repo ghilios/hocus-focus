@@ -77,7 +77,8 @@ public class HocusFocusVMChartReloadTests {
     /// report's own <c>DateTime.Now</c> and the file name's land on opposite sides of a second boundary.
     /// </summary>
     private void WriteReport(DateTime timestamp, double initialPosition, double initialHfr, double finalHfr,
-                             DateTime? fileNameStamp = null, int starCountMin = -1, int starCountMax = -1) {
+                             DateTime? fileNameStamp = null, int starCountMin = -1, int starCountMax = -1,
+                             ReportColorChannels colorChannels = null) {
         var report = new HocusFocusReport {
             Timestamp = timestamp,
             InitialFocusPoint = new FocusPoint { Position = initialPosition, Value = initialHfr },
@@ -85,6 +86,8 @@ public class HocusFocusVMChartReloadTests {
             FinalHFR = finalHfr,
             AcceptedStarCountMin = starCountMin,
             AcceptedStarCountMax = starCountMax,
+            ColorChannels = colorChannels,
+            HyperbolicFitModelChosen = colorChannels != null ? HyperbolicFitModel.Symmetric : null,
             Method = AFMethodEnum.STARHFR.ToString(),
             Fitting = AFCurveFittingEnum.TRENDHYPERBOLIC.ToString(),
             MeasurePoints = Array.Empty<FocusPoint>()
@@ -422,5 +425,62 @@ public class HocusFocusVMChartReloadTests {
             Assert.That(vm.HyperbolicFitting, Is.Not.Null);
             Assert.That(vm.HyperbolicFitting.Minimum.X, Is.EqualTo(5000).Within(StepSize));
         });
+    }
+    // ---- Per-colour-channel (OSC) curves on reload ------------------------------------------------------------
+
+    private static ReportColorChannels SavedChannels(int?[] deltas) {
+        ReportColorChannel Channel(int vertexShift, int? delta) => new ReportColorChannel {
+            FocusDelta = delta,
+            MeasurePoints = SyntheticFocusCurveSamples.SymmetricHyperbolaPoints(
+                    x0: 5000 + vertexShift, y0: 0.0, a: 2.0, b: 80.0, xStart: 4900, xStep: 25, count: 9)
+                .Select(p => new FocusPoint { Position = p.X, Value = p.Y, Error = 0.1 }).ToList()
+        };
+        return new ReportColorChannels { Red = Channel(20, deltas[0]), Green = Channel(0, deltas[1]), Blue = Channel(-15, deltas[2]) };
+    }
+
+    [Test]
+    public void CoreLoadChart_ForeignRunWithChannelData_RestoresPointsCurvesAndDeltas() {
+        var vm = BuildVM();
+        var loadedTimestamp = new DateTime(2026, 8, 5, 21, 47, 43);
+        WriteReport(loadedTimestamp, initialPosition: 5100, initialHfr: 3.0, finalHfr: 2.0, colorChannels: SavedChannels(new int?[] { 20, 0, null }));
+
+        SimulateCoreLoadChart(vm, WellCenteredSweep(), new DataPoint(5000, 2.0), loadedTimestamp);
+
+        Assert.Multiple(() => {
+            Assert.That(vm.ShowChannelCurves, Is.True);
+            Assert.That(vm.PlotGreenFocusPoints, Has.Count.EqualTo(9));
+            Assert.That(vm.RedFitting, Is.Not.Null, "the curve is refitted from the saved points");
+            Assert.That(vm.RedFitting(5020), Is.LessThan(vm.RedFitting(4920)), "the refitted red curve bottoms out near its own vertex");
+            Assert.That(vm.ChannelFocusDeltaText, Is.EqualTo("R +20  G 0  B —"), "deltas come from the report, not recomputed");
+        });
+    }
+
+    [Test]
+    public void CoreLoadChart_ForeignRunWithoutChannelData_ClearsThePreviousRunsChannels() {
+        var vm = BuildVM();
+        vm.ApplyColorChannels(HocusFocusVMColorChannelTests.Channels(new int?[] { 7, -1, -5 }), finalized: true);
+        Assume.That(vm.HasChannelFocusDeltas, Is.True);
+        var loadedTimestamp = new DateTime(2026, 8, 5, 21, 47, 43);
+        WriteReport(loadedTimestamp, initialPosition: 5100, initialHfr: 3.0, finalHfr: 2.0);
+
+        SimulateCoreLoadChart(vm, WellCenteredSweep(), new DataPoint(5000, 2.0), loadedTimestamp);
+
+        Assert.Multiple(() => {
+            Assert.That(vm.ShowChannelCurves, Is.False, "an older / mono report hides the channel series");
+            Assert.That(vm.HasChannelFocusDeltas, Is.False, "and the delta row");
+            Assert.That(vm.PlotRedFocusPoints, Is.Empty);
+        });
+    }
+
+    [Test]
+    public void CoreLoadChart_OwnRunWhoseReportIsUnreadable_KeepsTheLiveChannels() {
+        var vm = BuildVM();
+        var ownTimestamp = new DateTime(2026, 8, 5, 21, 47, 43);
+        vm.ApplyColorChannels(HocusFocusVMColorChannelTests.Channels(new int?[] { 7, -1, -5 }), finalized: true);
+        vm.MarkReportGenerated(ownTimestamp);
+
+        SimulateCoreLoadChart(vm, WellCenteredSweep(), new DataPoint(5000, 2.0), ownTimestamp);
+
+        Assert.That(vm.ChannelFocusDeltaText, Is.EqualTo("R +7  G −1  B −5"));
     }
 }

@@ -122,6 +122,12 @@ namespace TestApp {
                 return;
             }
 
+            // Headless per-colour-channel focus curves on a saved OSC AF run: `TestApp color-channels --af-run <dir> ...`
+            if (args.Length > 0 && args[0].Equals("color-channels", StringComparison.OrdinalIgnoreCase)) {
+                await ColorChannelsRunner.Run(args);
+                return;
+            }
+
             // Headless star-detection optimizer harness: `TestApp optimize --runs <dir> ...`
             if (args.Length > 0 && args[0].Equals("optimize", StringComparison.OrdinalIgnoreCase)) {
                 await OptimizationDiagnosticRunner.Run(args);
