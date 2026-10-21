@@ -196,6 +196,9 @@ namespace TestApp {
         /// <summary>True when this frame is carried as an <see cref="IRenderedImage"/> (the live-parity route).</summary>
         public bool IsRendered => rendered != null;
 
+        /// <summary>The rendered frame (debayered for a bayered frame), or null for a .tif.</summary>
+        public IRenderedImage Rendered => rendered;
+
         /// <summary>The frame's own header metadata (pixel size, focal length, exposure), or null for a .tif —
         /// which carries none. Feeds <c>HarnessSettingsStore.PixelScaleForFrame</c>.</summary>
         public NINA.Image.ImageData.ImageMetaData MetaData => rendered?.RawImageData?.MetaData;

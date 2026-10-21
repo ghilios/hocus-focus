@@ -52,7 +52,7 @@ namespace TestApp {
             @"^(?<IMAGE_INDEX>\d+)_Frame(?<FRAME_NUMBER>\d+)_BitDepth(?<BITDEPTH>\d+)_Bayered(?<BAYERED>\d)_Focuser(?<FOCUSER>\d+)(_HFR(?<HFR>(\d+)(\.\d+)?))?$",
             RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
-        private sealed class Frame {
+        internal sealed class Frame {
             public string Path;
             public int FocuserPosition;
         }
@@ -471,7 +471,7 @@ namespace TestApp {
         // Deserialize the original run's StarDetectorParams from any saved per-region detection-result JSON in the
         // run tree (initial/ or final/ or attempt*/). When paramsFrom is given, only JSONs whose path contains that
         // substring are considered (e.g. "initial" to pin the initial-HFR frame's region). Returns (null, reason).
-        private static (StarDetectorParams, string) LoadOriginalDetectorParams(string afRun, string paramsFrom) {
+        internal static (StarDetectorParams, string) LoadOriginalDetectorParams(string afRun, string paramsFrom) {
             try {
                 var jsons = Directory.EnumerateFiles(afRun, "*_star_detection_result.json", SearchOption.AllDirectories)
                     .Where(p => string.IsNullOrWhiteSpace(paramsFrom) || p.IndexOf(paramsFrom, StringComparison.OrdinalIgnoreCase) >= 0)
@@ -522,7 +522,7 @@ namespace TestApp {
             return new RatioRect(sx, sy, w, h);
         }
 
-        private static int EstimateStepSize(List<Frame> frames, IProfileService profileService) {
+        internal static int EstimateStepSize(List<Frame> frames, IProfileService profileService) {
             var positions = frames.Select(f => f.FocuserPosition).Distinct().OrderBy(p => p).ToList();
             if (positions.Count >= 2) {
                 var diffs = new List<int>();
@@ -567,7 +567,7 @@ namespace TestApp {
             return rejected;
         }
 
-        private static List<Frame> ParseAfRun(string dir) {
+        internal static List<Frame> ParseAfRun(string dir) {
             var root = new DirectoryInfo(dir);
             var search = root;
             if (!root.GetFiles().Any(f => ImageFileRegex.IsMatch(Path.GetFileNameWithoutExtension(f.Name)))) {
