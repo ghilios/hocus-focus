@@ -64,6 +64,7 @@ If it fails, the whole run is retried up to NINA's configured number of attempts
 | **\(\sigma_{\text{focus}}\)** | Standard error of the fitted minimum position, estimated from the hyperbolic fit's Jacobian; drawn as the horizontal error band on the best-focus marker. Degenerate (low-curvature) fits may report NaN. |
 | **LOO Std Error** | Leave-one-out stability: the spread of predicted best-focus positions when each point is dropped in turn. It serves as a fallback for \(\sigma_{\text{focus}}\) when that is degenerate. Recorded in the saved report, but not shown as a panel row. |
 | **Stars detected (curve)** | The fewest and the most stars found at any single focuser position the curve was fitted on. Points the fit discarded (outliers, and points outside the symmetric fit window) are left out, so the range describes the data the result rests on. Low counts mean the best-focus position will move more from run to run. |
+| **R/G/B Δ focus** | Shown only when **Measure Color Channels** is on and the frames are from a color (OSC) camera. Each color channel's best-focus position minus the luminance best focus, in focuser steps. See [Color channel focus curves](#color-channel-focus-curves). |
 
 !!! warning "Reduced \(\chi^2\) is not a calibrated test here"
     The per-point \(\sigma\) is the star-ensemble scatter, which overstates the uncertainty of the per-point median HFR. As the verbatim tooltip notes, reduced \(\chi^2\) "typically runs well below 1, shrinks as more stars are detected, and grows as Frames Per Point increases. Treat this threshold as a coarse sanity bound rather than a calibrated statistical test." It is only meaningful with weighted fits.
@@ -93,12 +94,39 @@ All tooltips below are quoted verbatim from the plugin UI.
 | **Save Path** | (empty) | folder | "The folder to save Auto Focus runs" |
 | **Focuser Offset** | 0 | any | "Advanced Only! Moves the focuser this fixed amount at the end of an AutoFocus" |
 | **Max Blind Steps Per Direction** | 8 | ≥ 0 (0 disables) | "Maximum number of blind AutoFocus steps attempted in each direction before reversing to try the other side. Set to 0 to disable the cap." |
+| **Measure Color Channels** | Off | — | "OSC only. Measures R/G/B focus alongside luminance for display; does not change where AF focuses." |
 | **Reverse Initial Direction** | Off | — | "Start AutoFocus below the current focuser position and take the initial measurements with increasing focuser moves, instead of starting above it with decreasing moves. Enable this when your focuser's backlash compensation fires on decreasing moves (common on SCTs that focus by moving the primary mirror), so most AutoFocus moves avoid it." |
 
 !!! tip "When these help"
     - Leave **Weighted Hyperbolic Fit** on and **Hyperbolic Fit Model** set to **Hybrid (Best Fit)**. Those are the defaults, and they let each run pick its most reliable model and discount noisy points; only the reduced-\(\chi^2\) gate depends on the weighting being enabled.
     - Set **Max Concurrency** to a non-zero cap only if frame processing is starving memory or CPU on a slow machine; leave it at 0 (no limit) otherwise.
     - Set a non-zero **Focuser Offset** only for a measured, repeatable focus bias in your train. It is an advanced-only fixed nudge applied after the calculated position.
+
+## Color channel focus curves
+
+With a one-shot color (OSC) camera, red, green and blue light often come to focus at slightly different
+focuser positions. This is longitudinal chromatic aberration, and the luminance curve alone hides it. Turn on
+**Measure Color Channels** to see it.
+
+With the option on, each autofocus frame is also split into its red, green and blue planes. The stars the
+luminance measurement accepted are measured again on each plane, at the same positions, so all three channels
+are compared on the same stars. The chart then draws a small red, green and blue marker per point and a thin
+fitted curve per channel, drawn behind the luminance series. Each channel uses the run's curve fitting type
+and, for a hyperbolic fit, the model the run selected. The points the symmetric fit window excluded are left
+out. A Trendlines run shows the channel points but draws no channel curve.
+
+When the run finishes, the **R/G/B Δ focus** row shows each channel's best focus relative to the luminance
+best focus, for example `R +7  G −1  B −5`. A positive number means that channel focuses at a higher focuser
+position. A channel shows `—` when its fit fails the same quality check a luminance fit must pass, or when its
+best focus falls outside the positions the run measured.
+
+The channel curves are for display only. Autofocus still moves to the luminance best focus, and turning the
+option on does not change the luminance fit.
+
+The option applies to Star HFR runs started from the **Auto Focus** panel, from the sequencer, or by replaying
+a saved run. The Aberration Inspector and the wizards ignore it, and frames from a mono camera are not
+measured. Each measured frame is debayered once more, so a run takes slightly longer with the option on. The
+saved report records the channel points and deltas, so loading a past run back into the chart shows them again.
 
 ## Binning during autofocus
 
