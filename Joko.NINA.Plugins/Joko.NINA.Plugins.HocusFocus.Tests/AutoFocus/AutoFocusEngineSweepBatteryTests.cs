@@ -784,10 +784,10 @@ namespace NINA.Joko.Plugins.HocusFocus.Tests.AutoFocus {
         /// <paramref name="options"/> (STARHFR + HYPERBOLIC — both the DTO and the profile must agree, since finalization
         /// reads the profile). Everything else is a bare NSubstitute.
         /// </summary>
-        internal static SweepHarness BuildHarness(DegradationScenario scenario, AutoFocusEngineOptions options, int startPosition, int focuserMin, int focuserMax) {
+        internal static SweepHarness BuildHarness(DegradationScenario scenario, AutoFocusEngineOptions options, int startPosition, int focuserMin, int focuserMax, bool isBayered = false) {
             var focuser = new MovingFocuserMediator(startPosition, focuserMin, focuserMax);
             var ledger = new SweepFrameLedger();
-            var imaging = new StampedImagingMediator(focuser, ledger);
+            var imaging = new StampedImagingMediator(focuser, ledger, isBayered: isBayered);
             var detection = new ScriptedStarDetection(ledger, scenario);
 
             var starDetectionSelector = Substitute.For<IPluggableBehaviorSelector<IStarDetection>>();

@@ -10,6 +10,7 @@
 
 #endregion "copyright"
 
+using NINA.Core.Enum;
 using NINA.Core.Model;
 using NINA.Core.Utility;
 using NINA.Equipment.Interfaces.Mediator;
@@ -86,7 +87,15 @@ namespace NINA.Joko.Plugins.HocusFocus.Tests.AutoFocus.Harness {
                 ? box.Position
                 : focuser.Position; // Only reached if an unstamped IImageData is prepared; keeps behavior defined.
 
-            var rendered = Substitute.For<IRenderedImage>();
+            // A bayered frame arrives debayered (as NINA's PrepareImage does with debayering on), carrying its CFA pattern.
+            IRenderedImage rendered;
+            if (isBayered) {
+                var debayered = Substitute.For<IDebayeredImage>();
+                debayered.BayerPattern.Returns(SensorType.RGGB);
+                rendered = debayered;
+            } else {
+                rendered = Substitute.For<IRenderedImage>();
+            }
             rendered.RawImageData.Returns(imageData);
             rendered.OriginalImage.Returns((BitmapSource)null); // annotation path early-returns on a null OriginalImage
             rendered.Image.Returns((BitmapSource)null);

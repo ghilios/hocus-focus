@@ -957,6 +957,14 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
         // persisted "Keep frames for review" toggle is on. When retaining, force the engine to preserve exposures and
         // model PSFs (iff PSF modeling is enabled in star-detection options) so the review can show PSF-derived
         // per-star properties (AF normally skips PSF fitting for speed). Sets frameReviewRequestedForRun as a side effect.
+        // The AF pane is the only caller that opts into per-colour-channel curves (GetOptions leaves them off), since it
+        // is the one that charts them.
+        private void ApplyColorChannelOption(AutoFocusEngineOptions options) {
+            if (autoFocusOptions.MeasureColorChannels) {
+                options.MeasureColorChannels = true;
+            }
+        }
+
         private void ApplyFrameReviewOptions(AutoFocusEngineOptions options) {
             frameReviewRequestedForRun = IsInteractive && autoFocusOptions.KeepFramesForReview;
             if (frameReviewRequestedForRun) {
@@ -1001,6 +1009,7 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                 // filter this run will actually expose through (the engine applies the AF-filter substitution
                 // itself). The wheel-connected gate above already ran.
                 var options = autoFocusEngine.GetOptions(imagingFilter: imagingFilter);
+                ApplyColorChannelOption(options);
 
                 ApplyFrameReviewOptions(options);
                 var result = await autoFocusEngine.Run(options, imagingFilter, autoFocusRunCts.Token, progress);
@@ -1493,7 +1502,11 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                     profileService,
                     savedAttempt.FolderPath,
                     IsInteractive,
-                    () => autoFocusEngine.GetOptions(savedAttempt));
+                    () => {
+                        var baseOptions = autoFocusEngine.GetOptions(savedAttempt);
+                        ApplyColorChannelOption(baseOptions);
+                        return baseOptions;
+                    });
                 if (resolution.Cancelled) {
                     return false;
                 }
