@@ -25,6 +25,52 @@ using System.Linq;
 
 namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
 
+    /// <summary>One colour channel's saved focus data. See <see cref="HocusFocusReport.ColorChannels"/>.</summary>
+    public class ReportColorChannel {
+
+        /// <summary>Channel optimum minus the luminance optimum, in focuser steps; null when the channel had no acceptable fit.</summary>
+        [JsonProperty]
+        public int? FocusDelta { get; set; }
+
+        [JsonProperty]
+        public List<FocusPoint> MeasurePoints { get; set; } = new List<FocusPoint>();
+
+        internal static ReportColorChannel From(AutoFocusColorChannelCurve curve) => new ReportColorChannel() {
+            FocusDelta = curve?.FocusDelta,
+            MeasurePoints = (curve?.Points ?? Array.Empty<AutoFocusRegionPoint>())
+                .Select(p => new FocusPoint() { Position = p.FocuserPosition, Value = p.Measurement.Measure, Error = p.Measurement.Stdev })
+                .ToList()
+        };
+    }
+
+    /// <summary>The per-colour-channel (OSC) focus data of a run that measured it.</summary>
+    public class ReportColorChannels {
+
+        [JsonProperty]
+        public ReportColorChannel Red { get; set; }
+
+        [JsonProperty]
+        public ReportColorChannel Green { get; set; }
+
+        [JsonProperty]
+        public ReportColorChannel Blue { get; set; }
+
+        /// <summary>R, G, B — indexed by <see cref="ColorChannel"/>.</summary>
+        [JsonIgnore]
+        public ReportColorChannel[] All => new[] { Red, Green, Blue };
+
+        internal static ReportColorChannels From(AutoFocusColorChannels channels) {
+            if (channels?.Channels == null) {
+                return null;
+            }
+            return new ReportColorChannels() {
+                Red = ReportColorChannel.From(channels[ColorChannel.Red]),
+                Green = ReportColorChannel.From(channels[ColorChannel.Green]),
+                Blue = ReportColorChannel.From(channels[ColorChannel.Blue])
+            };
+        }
+    }
+
     public class HocusFocusReport : AutoFocusReport {
 
         [JsonProperty]
@@ -64,6 +110,13 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
         [JsonProperty]
         public HyperbolicFitModel? HyperbolicFitModelChosen { get; set; } = null;
 
+        /// <summary>
+        /// Per-colour-channel focus points and deltas for an OSC run with "Measure color channels" on. Null for every
+        /// other run and on older reports, which is what keeps the R/G/B row hidden when such a report is reloaded.
+        /// </summary>
+        [JsonProperty]
+        public ReportColorChannels ColorChannels { get; set; } = null;
+
         [JsonProperty]
         public StarDetectionRegion Region { get; set; } = StarDetectionRegion.Full;
 
@@ -93,7 +146,8 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
             IAutoFocusOptions hocusFocusAutoFocusOptions,
             TimeSpan duration,
             int acceptedStarCountMin = -1,
-            int acceptedStarCountMax = -1) {
+            int acceptedStarCountMax = -1,
+            AutoFocusColorChannels colorChannels = null) {
             var trendlineFitting = fittings.TrendlineFitting;
             var quadraticFitting = fittings.QuadraticFitting;
             var hyperbolicFitting = fittings.HyperbolicFitting;
@@ -124,6 +178,7 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                 HyperbolicFitModelChosen = fittings.SelectedHyperbolicFitModel,
                 AcceptedStarCountMin = acceptedStarCountMin,
                 AcceptedStarCountMax = acceptedStarCountMax,
+                ColorChannels = ReportColorChannels.From(colorChannels),
                 Method = profileService.ActiveProfile.FocuserSettings.AutoFocusMethod.ToString(),
                 Fitting = profileService.ActiveProfile.FocuserSettings.AutoFocusMethod == AFMethodEnum.STARHFR ? profileService.ActiveProfile.FocuserSettings.AutoFocusCurveFitting.ToString() : "GAUSSIAN",
                 MeasurePoints = focusPoints.Select(x => new FocusPoint() { Position = x.X, Value = x.Y, Error = x.ErrorY }),

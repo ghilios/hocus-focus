@@ -537,6 +537,7 @@
     <TextBlock x:Key="MeasurementAverage_Tooltip" Text="Controls how the average star measurement across the frame is calculated. Median is robust to outliers, and is the default." />
     <TextBlock x:Key="MaxAutoFocusOutlierRejections_Tooltip" Text="Controls the maximum number of points that can be rejected as outliers during Auto Focus curve fitting." />
     <TextBlock x:Key="MaxBlindStepsPerDirection_Tooltip" Text="Maximum number of blind AutoFocus steps attempted in each direction before reversing to try the other side. Set to 0 to disable the cap." />
+    <TextBlock x:Key="MeasureColorChannels_Tooltip" Text="OSC only. Measures R/G/B focus alongside luminance for display; does not change where AF focuses." />
     <TextBlock x:Key="ReverseInitialDirection_Tooltip" Text="Start AutoFocus below the current focuser position and take the initial measurements with increasing focuser moves, instead of starting above it with decreasing moves. Enable this when your focuser's backlash compensation fires on decreasing moves (common on SCTs that focus by moving the primary mirror), so most AutoFocus moves avoid it." />
     <!--  Declared here, not in AutoFocus/DataTemplates.xaml: that file MERGES this one, so a key defined here is visible to both rows that show the flag.  -->
     <TextBlock x:Key="FocuserStepSizeMismatch_Tooltip" Text="Your focuser step size differs from what the driver reports by more than 1%. This is informational — your value is the one being used, and if you measured it yourself it is probably the better one. It is worth a look because some drivers report this field wrongly (a common case reports 1, meaning one step per step rather than one micron per step). Clear the box to use the driver's value instead." />
@@ -593,6 +594,7 @@
                 <RowDefinition />
                 <RowDefinition Style="{StaticResource ShowOnReducedChiSquaredCriterion}" />
                 <RowDefinition Style="{StaticResource ShowOnRSquaredCriterion}" />
+                <RowDefinition />
                 <RowDefinition />
                 <RowDefinition />
                 <RowDefinition />
@@ -1012,6 +1014,22 @@
                     </ComboBoxItem.Tag>
                 </ComboBoxItem>
             </ComboBox>
+
+            <TextBlock
+                Grid.Row="19"
+                Grid.Column="0"
+                VerticalAlignment="Center"
+                Text="Measure Color Channels"
+                ToolTip="{StaticResource MeasureColorChannels_Tooltip}" />
+            <CheckBox
+                Grid.Row="19"
+                Grid.Column="1"
+                MinWidth="80"
+                Margin="5,5,0,0"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Center"
+                IsChecked="{Binding AutoFocusOptions.MeasureColorChannels}"
+                ToolTip="{StaticResource MeasureColorChannels_Tooltip}" />
         </Grid>
     </DataTemplate>
     <DataTemplate x:Key="HocusFocus_StarDetection_Options">

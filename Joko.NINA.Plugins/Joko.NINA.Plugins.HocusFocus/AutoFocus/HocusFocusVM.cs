@@ -136,6 +136,9 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
             PlotRejectedFocusPoints = new AsyncObservableCollection<ScatterPoint>();
             PlotWindowExcludedFocusPoints = new AsyncObservableCollection<ScatterErrorPoint>();
             PlotCoreFocusPoints = new AsyncObservableCollection<ScatterErrorPoint>();
+            PlotRedFocusPoints = new AsyncObservableCollection<ScatterErrorPoint>();
+            PlotGreenFocusPoints = new AsyncObservableCollection<ScatterErrorPoint>();
+            PlotBlueFocusPoints = new AsyncObservableCollection<ScatterErrorPoint>();
             ClearCharts();
 
             this.progress = ProgressFactory.Create(applicationStatusMediator, "Hocus Focus");
@@ -368,6 +371,199 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
         /// <summary>Gates the "○ excluded — outside focus window" chart legend; true only once the window excludes a point.</summary>
         public bool HasWindowExcludedFocusPoints => PlotWindowExcludedFocusPoints?.Count > 0;
 
+        // ---- Per-colour-channel (OSC) focus curves ------------------------------------------------------
+        //
+        // Display only. Filled from the engine's ColorChannels payload when an OSC run measured them ("Measure color
+        // channels" option), and from a reloaded report's saved channel points. Never an input to anything else here.
+
+        public AsyncObservableCollection<ScatterErrorPoint> PlotRedFocusPoints { get; }
+        public AsyncObservableCollection<ScatterErrorPoint> PlotGreenFocusPoints { get; }
+        public AsyncObservableCollection<ScatterErrorPoint> PlotBlueFocusPoints { get; }
+
+        private Func<double, double> redFitting;
+        private Func<double, double> greenFitting;
+        private Func<double, double> blueFitting;
+
+        /// <summary>The red channel's fitted curve for the run's curve-fitting type; null when there is none to draw.</summary>
+        public Func<double, double> RedFitting {
+            get => redFitting;
+            private set {
+                redFitting = value;
+                RaisePropertyChanged();
+            }
+        }
+
+        /// <inheritdoc cref="RedFitting"/>
+        public Func<double, double> GreenFitting {
+            get => greenFitting;
+            private set {
+                greenFitting = value;
+                RaisePropertyChanged();
+            }
+        }
+
+        /// <inheritdoc cref="RedFitting"/>
+        public Func<double, double> BlueFitting {
+            get => blueFitting;
+            private set {
+                blueFitting = value;
+                RaisePropertyChanged();
+            }
+        }
+
+        private bool showChannelCurves;
+
+        /// <summary>True while the chart has colour-channel data to show.</summary>
+        public bool ShowChannelCurves {
+            get => showChannelCurves;
+            private set {
+                if (showChannelCurves != value) {
+                    showChannelCurves = value;
+                    RaisePropertyChanged();
+                }
+            }
+        }
+
+        private string channelFocusDeltaText;
+
+        /// <summary>
+        /// The finalized per-channel focus offsets, e.g. <c>R +12  G −3  B +27</c>; null until the run is finalized (the
+        /// deltas only exist then), which collapses the row.
+        /// </summary>
+        public string ChannelFocusDeltaText {
+            get => channelFocusDeltaText;
+            private set {
+                if (channelFocusDeltaText != value) {
+                    channelFocusDeltaText = value;
+                    RaisePropertyChanged();
+                    RaisePropertyChanged(nameof(HasChannelFocusDeltas));
+                }
+            }
+        }
+
+        public bool HasChannelFocusDeltas => !string.IsNullOrEmpty(ChannelFocusDeltaText);
+
+        // The latest engine payload, carried into the saved report.
+        private AutoFocusColorChannels colorChannels;
+
+        /// <summary>
+        /// Formats the per-channel focus offsets for the info table: signed focuser steps with a true minus sign, and
+        /// an em dash for a channel without an acceptable fit.
+        /// </summary>
+        public static string FormatChannelFocusDeltas(int? red, int? green, int? blue) {
+            static string Format(int? delta) {
+                if (!delta.HasValue) {
+                    return "—";
+                }
+                if (delta.Value > 0) {
+                    return "+" + delta.Value.ToString(CultureInfo.InvariantCulture);
+                }
+                if (delta.Value < 0) {
+                    return "−" + (-delta.Value).ToString(CultureInfo.InvariantCulture);
+                }
+                return "0";
+            }
+            return $"R {Format(red)}  G {Format(green)}  B {Format(blue)}";
+        }
+
+        /// <summary>The curve the chart draws for a channel: the hyperbola or parabola the fitting type uses, else none.</summary>
+        internal static Func<double, double> ActiveChannelCurve(AutoFocusFitting fittings) {
+            if (fittings == null) {
+                return null;
+            }
+            switch (fittings.CurveFittingType) {
+                case AFCurveFittingEnum.HYPERBOLIC:
+                case AFCurveFittingEnum.TRENDHYPERBOLIC:
+                    return fittings.HyperbolicFitting?.Fitting;
+                case AFCurveFittingEnum.PARABOLIC:
+                case AFCurveFittingEnum.TRENDPARABOLIC:
+                    return fittings.QuadraticFitting?.Fitting;
+                default:
+                    return null;
+            }
+        }
+
+        private void ClearColorChannels() {
+            colorChannels = null;
+            PlotRedFocusPoints.Clear();
+            PlotGreenFocusPoints.Clear();
+            PlotBlueFocusPoints.Clear();
+            RedFitting = null;
+            GreenFitting = null;
+            BlueFitting = null;
+            ShowChannelCurves = false;
+            ChannelFocusDeltaText = null;
+        }
+
+        /// <summary>
+        /// Shows the engine's colour-channel payload. <paramref name="finalized"/> is true on run completion, when the
+        /// deltas exist; per-point events only refresh the points and live curves. A null payload clears the display.
+        /// internal so the display mapping is testable without an engine run.
+        /// </summary>
+        internal void ApplyColorChannels(AutoFocusColorChannels channels, bool finalized) {
+            if (channels?.Channels == null) {
+                ClearColorChannels();
+                return;
+            }
+            colorChannels = channels;
+            var series = new[] { PlotRedFocusPoints, PlotGreenFocusPoints, PlotBlueFocusPoints };
+            for (var c = 0; c < series.Length; c++) {
+                series[c].Clear();
+                foreach (var point in channels.Channels[c].Points ?? Array.Empty<AutoFocusRegionPoint>()) {
+                    series[c].AddSorted(new ScatterErrorPoint(point.FocuserPosition, point.Measurement.Measure, 0, AutoFocusEngine.SafeDisplayError(point.Measurement.Stdev)), focusPointComparer);
+                }
+            }
+            RedFitting = ActiveChannelCurve(channels[ColorChannel.Red].Fittings);
+            GreenFitting = ActiveChannelCurve(channels[ColorChannel.Green].Fittings);
+            BlueFitting = ActiveChannelCurve(channels[ColorChannel.Blue].Fittings);
+            ShowChannelCurves = true;
+            ChannelFocusDeltaText = finalized
+                ? FormatChannelFocusDeltas(channels[ColorChannel.Red].FocusDelta, channels[ColorChannel.Green].FocusDelta, channels[ColorChannel.Blue].FocusDelta)
+                : null;
+        }
+
+        /// <summary>
+        /// Restores a reloaded chart's colour channels from its saved report: the measured points and the saved deltas,
+        /// with each curve refitted the way the run fitted it (the report's chosen hyperbolic model, the luminance
+        /// window exclusions <see cref="SetCurveFittings"/> just re-derived). A report without channel data — every
+        /// non-OSC run and every older report — clears the display.
+        /// </summary>
+        private void ApplyColorChannelsFromLoadedReport(HocusFocusReport report, string method, string fitting, IReadOnlyCollection<int> windowExcludedPositions, int stepSize) {
+            if (report?.ColorChannels == null || !Enum.TryParse<AFCurveFittingEnum>(fitting, out var curveFittingType)
+                || !Enum.TryParse<AFMethodEnum>(method, out var afMethod)) {
+                ClearColorChannels();
+                return;
+            }
+            var model = report.HyperbolicFitModelChosen ?? autoFocusOptions.HyperbolicFitModel;
+            if (model == HyperbolicFitModel.Hybrid) {
+                model = HyperbolicFitModel.Symmetric;
+            }
+            var curves = report.ColorChannels.All.Select(saved => {
+                var points = (saved?.MeasurePoints ?? new List<FocusPoint>()).OrderBy(p => p.Position).Select(p => new AutoFocusRegionPoint() {
+                    FocuserPosition = (int)Math.Round(p.Position),
+                    Measurement = new MeasureAndError() { Measure = p.Value, Stdev = p.Error }
+                }).ToArray();
+                var fitInput = WeightRegularization.Regularize(points
+                    .Where(p => p.Measurement.Measure > 0.0 && !windowExcludedPositions.Contains(p.FocuserPosition))
+                    .Select(p => new ScatterErrorPoint(p.FocuserPosition, p.Measurement.Measure, 0, AutoFocusEngine.SafeDisplayError(p.Measurement.Stdev)))
+                    .ToList());
+                AutoFocusFitting fittings = null;
+                if (afMethod == AFMethodEnum.STARHFR && fitInput.Count >= 3) {
+                    fittings = new AutoFocusFitting() { Method = afMethod, CurveFittingType = curveFittingType, SelectedHyperbolicFitModel = model };
+                    if (curveFittingType == AFCurveFittingEnum.HYPERBOLIC || curveFittingType == AFCurveFittingEnum.TRENDHYPERBOLIC) {
+                        var hf = AlglibHyperbolicFitting.Create(this.alglibAPI, model, fitInput, stepSize, autoFocusOptions.WeightedHyperbolicFitEnabled);
+                        if (hf.Solve()) {
+                            fittings.HyperbolicFitting = hf;
+                        }
+                    } else if (curveFittingType == AFCurveFittingEnum.PARABOLIC || curveFittingType == AFCurveFittingEnum.TRENDPARABOLIC) {
+                        fittings.QuadraticFitting = new QuadraticFitting().Calculate(fitInput);
+                    }
+                }
+                return new AutoFocusColorChannelCurve() { Fittings = fittings, Points = points, FocusDelta = saved?.FocusDelta };
+            }).ToArray();
+            ApplyColorChannels(new AutoFocusColorChannels() { Channels = curves }, finalized: true);
+        }
+
         public QuadraticFitting QuadraticFitting {
             get => quadraticFitting;
             set {
@@ -539,6 +735,7 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
             PlotWindowExcludedFocusPoints.Clear();
             PlotCoreFocusPoints.Clear();
             RaisePropertyChanged(nameof(HasWindowExcludedFocusPoints));
+            ClearColorChannels();
             TrendlineFitting = null;
             QuadraticFitting = null;
             HyperbolicFitting = null;
@@ -592,7 +789,8 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                 autoFocusOptions: this.autoFocusOptions,
                 duration: duration,
                 acceptedStarCountMin: AcceptedStarCountMin,
-                acceptedStarCountMax: AcceptedStarCountMax);
+                acceptedStarCountMax: AcceptedStarCountMax,
+                colorChannels: colorChannels);
             if (report != null) {
                 MarkReportGenerated(report.Timestamp);
             }
@@ -652,7 +850,8 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
             StarDetectionRegion region,
             TimeSpan duration,
             int acceptedStarCountMin = -1,
-            int acceptedStarCountMax = -1) {
+            int acceptedStarCountMax = -1,
+            AutoFocusColorChannels colorChannels = null) {
             try {
                 var report = HocusFocusReport.GenerateReport(
                     profileService,
@@ -671,7 +870,8 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                     autoFocusOptions,
                     duration,
                     acceptedStarCountMin,
-                    acceptedStarCountMax
+                    acceptedStarCountMax,
+                    colorChannels
                 );
 
                 var reportText = JsonConvert.SerializeObject(report, Formatting.Indented);
@@ -720,6 +920,7 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
             // same regularization the live engine applies must happen here too.
             var validFocusPoints = WeightRegularization.Regularize(FocusPoints.Where(fp => fp.Y > 0.0).ToList());
             var windowExcluded = new List<ScatterErrorPoint>();
+            var (chartStepSize, _) = ResolveReloadedChartSweepGeometry(loadedReport);
 
             if (AFMethodEnum.STARHFR.ToString() == method) {
                 if (validFocusPoints.Count() >= 3) {
@@ -793,6 +994,12 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
             // on screen" then keeps exactly the wrong thing. Re-reading unconditionally makes the rows a function
             // of the LOADED run rather than of the path taken to it.
             ApplyInfoRowsFromLoadedReport(loadedReport, LastAutoFocusPoint?.Timestamp);
+            // Same rule for the colour channels: from the LOADED run's report, or cleared — except this VM's own run
+            // whose report can't be read back, where the live channel display is still about the loaded run.
+            if (loadedReport != null || LastAutoFocusPoint?.Timestamp != lastGeneratedReportTimestamp) {
+                ApplyColorChannelsFromLoadedReport(loadedReport, method, fitting,
+                    windowExcluded.Select(p => (int)Math.Round(p.X)).ToHashSet(), chartStepSize);
+            }
             RefreshFinalFocusPointError();
         }
 
@@ -1169,10 +1376,12 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
                     hocusFocusAutoFocusOptions: this.autoFocusOptions,
                     duration: e.Duration,
                     acceptedStarCountMin: AcceptedStarCountMin,
-                    acceptedStarCountMax: AcceptedStarCountMax);
+                    acceptedStarCountMax: AcceptedStarCountMax,
+                    colorChannels: colorChannels);
 
                 SaveRegionReport(e.SaveFolder, e.Iteration, report);
             }
+            ClearColorChannels();
 
             FocusPoints.Clear();
             PlotFinalFocusPointWithError.Clear();
@@ -1235,6 +1444,8 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
             // are re-synced: the live per-point events see only the intermediate Grubbs flags and never see the
             // window exclusions at all.
             UpdateAcceptedStarCountRange(firstRegion.RejectedPoints, firstRegion.WindowExcludedPoints);
+
+            ApplyColorChannels(firstRegion.ColorChannels, finalized: true);
 
             RefreshFinalFocusPointError();
             AutoFocusDuration = e.Duration;
@@ -1301,6 +1512,8 @@ namespace NINA.Joko.Plugins.HocusFocus.AutoFocus {
             this.GaussianFitting = e.Fittings.GaussianFitting;
             this.HyperbolicFitting = e.Fittings.HyperbolicFitting;
             this.QuadraticFitting = e.Fittings.QuadraticFitting;
+
+            ApplyColorChannels(e.ColorChannels, finalized: false);
         }
 
         // ---- Review Frames (manual-AF only) -------------------------------------------------------------

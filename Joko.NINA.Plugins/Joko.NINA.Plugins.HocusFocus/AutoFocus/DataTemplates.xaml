@@ -216,6 +216,45 @@
                         TicklineColor="{Binding Path=Color, Source={StaticResource SecondaryBrush}}" />
                 </oxy:Plot.Axes>
                 <oxy:Plot.Series>
+                    <!--  Per-colour-channel (OSC) focus points: small, semi-transparent, fixed R/G/B markers, declared FIRST so
+                          every luminance series draws on top of them. Empty (and collapsed) unless the run measured colour
+                          channels. Display only; the AF focuses on luminance.  -->
+                    <oxy:ScatterErrorSeries
+                        DataFieldX="FocusPosition"
+                        DataFieldY="HFR"
+                        ErrorBarColor="#A0E04848"
+                        ErrorBarStopWidth="1"
+                        ErrorBarStrokeThickness="1"
+                        ItemsSource="{Binding PlotRedFocusPoints}"
+                        MarkerFill="#A0E04848"
+                        MarkerSize="3"
+                        MarkerType="Circle"
+                        TrackerFormatString="Focuser: {2:0}, R HFR: {4:0.000}"
+                        Visibility="{Binding ShowChannelCurves, Converter={StaticResource BooleanToVisibilityCollapsedConverter}}" />
+                    <oxy:ScatterErrorSeries
+                        DataFieldX="FocusPosition"
+                        DataFieldY="HFR"
+                        ErrorBarColor="#A040B040"
+                        ErrorBarStopWidth="1"
+                        ErrorBarStrokeThickness="1"
+                        ItemsSource="{Binding PlotGreenFocusPoints}"
+                        MarkerFill="#A040B040"
+                        MarkerSize="3"
+                        MarkerType="Circle"
+                        TrackerFormatString="Focuser: {2:0}, G HFR: {4:0.000}"
+                        Visibility="{Binding ShowChannelCurves, Converter={StaticResource BooleanToVisibilityCollapsedConverter}}" />
+                    <oxy:ScatterErrorSeries
+                        DataFieldX="FocusPosition"
+                        DataFieldY="HFR"
+                        ErrorBarColor="#A04878E8"
+                        ErrorBarStopWidth="1"
+                        ErrorBarStrokeThickness="1"
+                        ItemsSource="{Binding PlotBlueFocusPoints}"
+                        MarkerFill="#A04878E8"
+                        MarkerSize="3"
+                        MarkerType="Circle"
+                        TrackerFormatString="Focuser: {2:0}, B HFR: {4:0.000}"
+                        Visibility="{Binding ShowChannelCurves, Converter={StaticResource BooleanToVisibilityCollapsedConverter}}" />
                     <!--  Window-excluded overlay (Behavior A): sweep points outside the symmetric focus window, rendered as
                           hollow rings (transparent fill + faint primary stroke) with a dimmed HFR error bar, so they read as
                           "present but excluded from the fit" WITHOUT the red-cross "rejected point" language used below.
@@ -293,6 +332,23 @@
                             </MultiBinding>
                         </oxy:LineAnnotation.Color>
                     </oxy:LineAnnotation>
+                    <!--  Per-colour-channel fitted curves: thin lines in the channel colours, declared before the luminance
+                          curves so luminance stays on top. Equation is null (nothing drawn) without channel data.  -->
+                    <controls:BoundedFunctionAnnotation
+                        Equation="{Binding RedFitting}"
+                        StrokeThickness="1"
+                        Color="#A0E04848"
+                        Visibility="{Binding ShowChannelCurves, Converter={StaticResource BooleanToVisibilityCollapsedConverter}}" />
+                    <controls:BoundedFunctionAnnotation
+                        Equation="{Binding GreenFitting}"
+                        StrokeThickness="1"
+                        Color="#A040B040"
+                        Visibility="{Binding ShowChannelCurves, Converter={StaticResource BooleanToVisibilityCollapsedConverter}}" />
+                    <controls:BoundedFunctionAnnotation
+                        Equation="{Binding BlueFitting}"
+                        StrokeThickness="1"
+                        Color="#A04878E8"
+                        Visibility="{Binding ShowChannelCurves, Converter={StaticResource BooleanToVisibilityCollapsedConverter}}" />
                     <controls:BoundedFunctionAnnotation Equation="{Binding QuadraticFitting.Fitting}">
                         <controls:BoundedFunctionAnnotation.Color>
                             <MultiBinding Converter="{StaticResource AFFittingToColorConverter}">
@@ -511,6 +567,18 @@
                     <UniformGrid VerticalAlignment="Center" Columns="2">
                         <TextBlock Text="Estimated Final HFR" />
                         <TextBlock Margin="5,0,0,0" Text="{Binding LastAutoFocusPoint.Focuspoint.Y, StringFormat=\{0:0.00\}}" />
+                    </UniformGrid>
+                </Border>
+                <!--  Per-colour-channel focus offsets (OSC, "Measure Color Channels"): each channel's best focus relative to
+                      the luminance best focus, in focuser steps. Collapsed until a run with channel data is finalized.  -->
+                <Border
+                    Margin="0,5,0,0"
+                    BorderBrush="{StaticResource BorderBrush}"
+                    BorderThickness="0"
+                    Visibility="{Binding HasChannelFocusDeltas, Converter={StaticResource BooleanToVisibilityCollapsedConverter}}">
+                    <UniformGrid VerticalAlignment="Center" Columns="2">
+                        <TextBlock Text="R/G/B Δ focus" ToolTip="Each colour channel's best focus relative to the luminance best focus, in focuser steps. Display only: AutoFocus moves to the luminance focus. — means that channel had no acceptable fit." />
+                        <TextBlock Margin="5,0,0,0" Text="{Binding ChannelFocusDeltaText}" />
                     </UniformGrid>
                 </Border>
                 <Border
